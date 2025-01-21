@@ -141,7 +141,7 @@ void BTSPP::startConnection(uint8_t *address) {
 void BTSPP::write(const std::string& msg) {
     if (msg.length() < MAX_STRING_LENGTH) {
         strcpy(writeBuf, msg.c_str());
-        ESP_LOGI(BT_SPP_TAG, "Writing message '%s' to %d", writeBuf, peerHandle);
+        ESP_LOGI(BT_SPP_TAG, "Writing message '%s' of length %d to %d", writeBuf, strlen(writeBuf), peerHandle);
         writeDone = false;
         bufPtr = writeBuf;
         if ((err = esp_spp_write(peerHandle, msg.length(), (uint8_t*)writeBuf)) != ESP_OK) {
@@ -192,6 +192,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
     case ESP_SPP_CLOSE_EVT:
         ESP_LOGI(BT_SPP_TAG, "ESP_SPP_CLOSE_EVT status:%d handle:%d close_by_remote:%d", param->close.status,
                  param->close.handle, param->close.async);
+        connectDone = false;
         break;
     case ESP_SPP_START_EVT:
         ESP_LOGI(BT_SPP_TAG, "ESP_SPP_START_EVT");
@@ -210,7 +211,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         if (param->write.status == ESP_SPP_SUCCESS) {
             if (bufPtr[param->write.len] == 0) {
                 writeDone = true;
-                ESP_LOGI(BT_SPP_TAG, "Wrote all data");
+                ESP_LOGI(BT_SPP_TAG, "Wrote all data, len=%d", param->write.len);
             } else {
                 ESP_LOGI(BT_SPP_TAG, "Wrote %d bytes, cong=%d", param->write.len, param->write.cong);
                 /*

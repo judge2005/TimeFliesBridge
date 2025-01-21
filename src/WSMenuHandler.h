@@ -13,6 +13,7 @@ public:
 
 	static String clockMenu;
 	static String ledsMenu;
+	static String extraMenu;
 	static String infoMenu;
 
 private:

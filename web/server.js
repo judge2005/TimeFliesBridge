@@ -31,7 +31,8 @@ var pages = {
 		"value": [
 			{"1": { "url" : "clock.html", "title" : "Clock" }},
 			{"2": { "url" : "leds.html", "title" : "LEDs" }},
-			{"3": { "url" : "info.html", "title" : "Info" }}
+			{"3": { "url" : "extra.html", "title" : "Extra" }},
+			{"4": { "url" : "info.html", "title" : "Info" }}
 		]
 	}
 
@@ -61,9 +62,17 @@ var sendClockValues = function(conn) {
 	conn.send(json);
 }
 
+var sendExtrasValues = function(conn) {
+	var json = '{"type":"sv.init.extras","value":';
+	json += JSON.stringify(state[3]);
+	json += '}';
+	console.log(json);
+	conn.send(json);
+}
+
 var sendInfoValues = function(conn) {
 	var json = '{"type":"sv.init.info","value":';
-	json += JSON.stringify(state[3]);
+	json += JSON.stringify(state[4]);
 	json += '}';
 	console.log(json);
 	conn.send(json);
@@ -77,8 +86,10 @@ var state = {
 		"display_on":0,
 		"display_off":24,
 		"off_state_off":1,
-		"time_zone":"EST5EDT,M3.2.0,M11.1.0",
-		"command":""
+		"effect": 1,
+		"ripple_direction": false,
+		"ripple_speed": true,
+		"time_zone":"EST5EDT,M3.2.0,M11.1.0"
 	},
 	"2": {
 		"backlights":false,
@@ -95,6 +106,9 @@ var state = {
 		"baselight_blue":7
 	},
 	"3": {
+		"command":"a command"
+	},
+	"4": {
 		'esp_boot_version' : "1234",
 		'esp_free_heap' : "5678",
 		'esp_sketch_size' : "90123",
@@ -172,10 +186,13 @@ wss.on('connection', function(conn) {
     	case 2:
     		sendLEDValues(conn);
     		break;
-    	case 3:
-    		sendInfoValues(conn);
-    		break;
-    	case 9:
+		case 3:
+			sendExtrasValues(conn);
+			break;
+		case 4:
+			sendInfoValues(conn);
+			break;
+		case 9:
     		message = message.substring(message.indexOf(':')+1);
     		var screen = message.substring(0, message.indexOf(':'));
     		var pair = message.substring(message.indexOf(':')+1);

@@ -19,6 +19,9 @@ public:
     static StringConfigItem& getTimeZone() { static StringConfigItem time_zone("time_zone", 63, "EST5EDT,M3.2.0,M11.1.0"); return time_zone; }	// POSIX timezone format
     static StringConfigItem& getCommand() { static StringConfigItem command("command", 63, ""); return command; }	// POSIX timezone format
     static IntConfigItem& getDimming() { static IntConfigItem dimming("dimming", 2); return dimming; }
+    static ByteConfigItem& getEffect() { static ByteConfigItem effect("effect", 0); return effect; }   // 0 = no effect, 1 = fade, 2 = ripple
+    static BooleanConfigItem& getRippleDirection() { static BooleanConfigItem ripple_direction("ripple_direction", false); return ripple_direction; } // 0 = right-to-left, 1 = left-to-right
+    static BooleanConfigItem& getRippleSpeed() { static BooleanConfigItem ripple_speed("ripple_speed", false); return ripple_speed; } // 0 = slow, 1 = fast
 
     bool clockOn();
     void setTimeSync(TimeSync *pTimeSync) { this->pTimeSync = pTimeSync; }

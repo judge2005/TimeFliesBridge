@@ -66,6 +66,14 @@ void ConfigItem<T>::debug(Print *debugPrint) const {
 }
 template void ConfigItem<uint64_t>::debug(Print *debugPrint) const;
 
+typedef enum {
+	NOT_INITIALIZED = 0,
+    NOT_CONNECTED,
+    SEARCHING,
+    CONNECTING,
+    CONNECTED,
+} SPPConnectionState;
+
 StringConfigItem hostName("hostname", 63, "timefliesbridge");
 LongConfigItem tfAddress("address", 0);
 
@@ -100,6 +108,9 @@ BaseConfigItem* clockSet[] {
 	&TimeFliesClock::getOffStateOff(),
 	&TimeFliesClock::getTimeZone(),
 	&TimeFliesClock::getCommand(),
+	&TimeFliesClock::getEffect(),
+	&TimeFliesClock::getRippleDirection(),
+	&TimeFliesClock::getRippleSpeed(),
 	0
 };
 
@@ -193,7 +204,7 @@ void asyncTimeSetCallback(String time) {
 	xQueueSend(sppQueue, msg, 0);
 }
 
-void sendMultipleCommands(const char *commands) {
+void sendCommands(const char *commands) {
 	static char buf[256];
 	if (strchr(commands, ';')) {
 		strncpy(buf, commands, 255);
@@ -213,7 +224,7 @@ void sendMultipleCommands(const char *commands) {
 	}
 }
 void onCommandChanged(ConfigItem<String> &item) {
-	sendMultipleCommands(item.value.c_str());
+	sendCommands(item.value.c_str());
 }
 
 void onDateFormatChanged(ConfigItem<byte> &item) {
@@ -227,17 +238,46 @@ void onDisplayChanged(ConfigItem<int> &item) {
 	char msg[MAX_MSG_SIZE] = {0};
 	if (item == 0) {
 		// show hh:mm
-		sendMultipleCommands("0x13,$BIT7,0***;0x13,$BIT6,0***;0x13,$BIT5,1***");
+		sendCommands("0x13,$BIT7,0***;0x13,$BIT6,0***;0x13,$BIT5,1***");
 	} else if (item == 1) {
 		// show mm:ss
-		sendMultipleCommands("0x13,$BIT7,1***;0x13,$BIT6,0***;0x13,$BIT5,1***");
+		sendCommands("0x13,$BIT7,1***;0x13,$BIT6,0***;0x13,$BIT5,1***");
 	} else if (item == 2) {
 		// show day and month according to date format
 		onDateFormatChanged(TimeFliesClock::getDateFormat());
-		sendMultipleCommands("0x13,$BIT7,0***;0x13,$BIT6,1***;0x13,$BIT5,1***");
+		sendCommands("0x13,$BIT7,0***;0x13,$BIT6,1***;0x13,$BIT5,1***");
 	} else if (item == 3) {
 		// show day and year
-		sendMultipleCommands("0x13,$BIT12,0***;0x13,$BIT7,1***;0x13,$BIT6,1***;0x13,$BIT5,1***");
+		sendCommands("0x13,$BIT12,0***;0x13,$BIT7,1***;0x13,$BIT6,1***;0x13,$BIT5,1***");
+	}
+}
+
+void onRippleSpeedChanged(ConfigItem<bool> &item) {
+	if (item) {
+		sendCommands("0x13,$BIT0,1***");
+	} else {
+		sendCommands("0x13,$BIT0,0***");
+	}
+}
+
+void onRippleDirectionChanged(ConfigItem<bool> &item) {
+	if (item) {
+		sendCommands("0x13,$BIT1,1***");
+	} else {
+		sendCommands("0x13,$BIT1,0***");
+	}
+}
+
+void onEffectChanged(ConfigItem<byte> &item) {
+	if (item == 0) {	// No Transition effect
+		sendCommands("0x13,$BIT3,1***");
+	} else if (item == 1) {	// Fade transition effect - need to turn off ripple
+		sendCommands("0x13,$BIT2,0***;0x13,$BIT3,0***");
+	} else if (item == 2) { // Ripple transition effect - need to turn on fade
+		// Set speed and direction first
+		onRippleSpeedChanged(TimeFliesClock::getRippleSpeed());
+		onRippleDirectionChanged(TimeFliesClock::getRippleDirection());
+		sendCommands("0x13,$BIT2,1***;0x13,$BIT3,0***");
 	}
 }
 
@@ -405,9 +445,7 @@ static const char* spp_data[] = {
   0
 };
 
-static int spp_data_index = 0;
-
-static uint8_t *s_p_data = NULL; /* data pointer of spp_data */
+SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
 void initSPP() {
     static bool inited = false;
@@ -417,11 +455,7 @@ void initSPP() {
         WiFi.setSleep(true);
         if (btSPP.init()) {
             if (btGAP.init()) {
-                if (tfAddress == 0ULL) {
-                    if (!btGAP.startInquiry()) {
-                        Serial.printf("BT peer inquiry initialization failed: %s", btGAP.getErrMessage().c_str());
-                    }
-                }
+				connectionStatus = NOT_CONNECTED;
             } else {
                 Serial.printf("GAP initialization failed: %s", btGAP.getErrMessage().c_str());
             }
@@ -434,37 +468,21 @@ void initSPP() {
 void sppTaskFn(void *pArg) {
     static char msg[MAX_MSG_SIZE];
 
-    bool connectSent = false;
 	uint32_t delayNextMsg = 1;
 	uint32_t lastSendOnState = millis();
 
 	while(true) {
-		BaseType_t result = xQueueReceive(sppQueue, msg, pdMS_TO_TICKS(1000));
+		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(1000));
         if (!wifiManager.isAP()) {
             initSPP();
         }
 
-		if (millis() - lastSendOnState >= 60000) {
-			lastSendOnState = millis();
-
-			if (timeFliesClock.clockOn()) {
-				// Full brightness and on
-				sendMultipleCommands("0x13,$BIT4,0***;0x13,$BIT15,0***");
-			} else {
-				if (TimeFliesClock::getOffStateOff()) {
-					// Full brightness, but off
-					sendMultipleCommands("0x13,$BIT15,1***;0x13,$BIT4,0***");
-				} else {
-					// Dim, but on
-					sendMultipleCommands("0x13,$BIT4,1***;0x13,$BIT15,0***");
-				}
-			}
-		}
-
 		if (result) {
 			if (*msg == 0) {
+				xQueueReceive(sppQueue, msg, 0);
 				initSPP();
-			} else {
+			} else if (connectionStatus == CONNECTED) {
+				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
 				btSPP.write(msg);
 				if (btSPP.isError()) {
@@ -477,9 +495,29 @@ void sppTaskFn(void *pArg) {
 			delayNextMsg = 1;
 		}
 
-        if (!connectSent) {
+		if (millis() - lastSendOnState >= 60000) {
+			lastSendOnState = millis();
+
+			if (connectionStatus == CONNECTED) {
+				// NOTE: sendCommands(...) just puts them on the queue
+				if (timeFliesClock.clockOn()) {
+					// Full brightness and on
+					sendCommands("0x13,$BIT4,0***;0x13,$BIT15,0***");
+				} else {
+					if (TimeFliesClock::getOffStateOff()) {
+						// Full brightness, but off
+						sendCommands("0x13,$BIT15,1***;0x13,$BIT4,0***");
+					} else {
+						// Dim, but on
+						sendCommands("0x13,$BIT4,1***;0x13,$BIT15,0***");
+					}
+				}
+			}
+		}
+
+        if (connectionStatus == NOT_CONNECTED) {
             if (tfAddress != 0ULL) {
-                connectSent = true;
+                connectionStatus = CONNECTING;
                 uint64_t uAddress = tfAddress;
                 esp_bd_addr_t address = {0};
                 address[0] = uAddress & 0xff;
@@ -490,10 +528,19 @@ void sppTaskFn(void *pArg) {
                 address[5] = (uAddress >> 40) & 0xff;
                 
                 btSPP.startConnection(address);
-            } else if (btGAP.inquiryDone()) {
+            } else {
+				connectionStatus = SEARCHING;
+				if (!btGAP.startInquiry()) {
+					Serial.printf("Error starting inqury: %s", btGAP.getErrMessage());
+					connectionStatus = NOT_CONNECTED;
+				}
+			}
+		}
+
+		if (connectionStatus == SEARCHING) {
+			if (btGAP.inquiryDone()) {
                 uint8_t *address = btGAP.getAddress("Time Flies");
                 if (address) {
-                	connectSent = true;
                     tfAddress =  ((uint64_t)address[0]) |
                                 ((uint64_t)address[1]) << 8 |
                                 ((uint64_t)address[2]) << 16 |
@@ -503,30 +550,38 @@ void sppTaskFn(void *pArg) {
                                 ;
                     tfAddress.put();
                     config.commit();
-                    btSPP.startConnection(address);
-                } else {
-                    // Try again
-                    if (!btGAP.startInquiry()) {
-						Serial.printf("Error starting inqury: %s", btGAP.getErrMessage());
-					}
-                }
+				}
+                connectionStatus = NOT_CONNECTED;
             }
         }
+
+		if (connectionStatus == CONNECTING) {
+			if (btSPP.connectionDone()) {
+				connectionStatus = CONNECTED;
+			}
+		}
+
+		if (connectionStatus == CONNECTED) {
+			if (btSPP.connectionDone() == false) {
+				// We disconnected! Start again.
+				connectionStatus = NOT_CONNECTED;
+			}
+		}
 	}
 }
 
 String* items[] {
 	&WSMenuHandler::clockMenu,
 	&WSMenuHandler::ledsMenu,
+	&WSMenuHandler::extraMenu,
 	&WSMenuHandler::infoMenu,
 	0
 };
 
 WSMenuHandler wsMenuHandler(items);
-// WSConfigHandler wsMqttHandler(rootConfig, "mqtt");
-// WSLEDConfigHandler wsLEDHandler(rootConfig, "leds", ledConfigCallback);
 WSConfigHandler wsClockHandler(rootConfig, "clock");
 WSConfigHandler wsLEDsHandler(rootConfig, "leds");
+WSConfigHandler wsExtrasHandler(rootConfig, "extra");
 WSInfoHandler wsInfoHandler(infoCallback);
 
 // Order of this needs to match the numbers in WSMenuHandler.cpp
@@ -534,6 +589,7 @@ WSHandler* wsHandlers[] {
 	&wsMenuHandler,
 	&wsClockHandler,
 	&wsLEDsHandler,
+	&wsExtrasHandler,
 	&wsInfoHandler,
 	NULL,
 	NULL,
@@ -827,6 +883,9 @@ void setup() {
 	TimeFliesClock::getHourFormat().setCallback(onHourFormatChanged);
 	TimeFliesClock::getTimeZone().setCallback(onTimezoneChanged);
 	TimeFliesClock::getCommand().setCallback(onCommandChanged);
+	TimeFliesClock::getEffect().setCallback(onEffectChanged);
+	TimeFliesClock::getRippleDirection().setCallback(onRippleDirectionChanged);
+	TimeFliesClock::getRippleSpeed().setCallback(onRippleSpeedChanged);
 
 	LEDs::getBacklightRed().setCallback(onRedBacklightsChanged);
 	LEDs::getBacklightGreen().setCallback(onGreenBacklightsChanged);
@@ -864,6 +923,8 @@ void setup() {
 
     Serial.print("setup() running on core ");
     Serial.println(xPortGetCoreID());
+
+	Serial.printf("LWIP_TCP_RTO_TIME=%d", LWIP_TCP_RTO_TIME);
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }

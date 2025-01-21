@@ -13,13 +13,13 @@
 			<div class="dispInline">
 				<fieldset data-role="controlgroup" data-type="horizontal" data-mini="true" id="display_type">
 					<input onchange="elementChange(this);" type="radio" name="time_or_date" id="display_time" value="0">
-					<label for="display_time">Time</label>
+					<label for="display_time">HH:mm</label>
 					<input onchange="elementChange(this);" type="radio" name="time_or_date" id="display_seconds" value="1">
-					<label for="display_seconds">Seconds</label>
+					<label for="display_seconds">mm:ss</label>
 					<input onchange="elementChange(this);" type="radio" name="time_or_date" id="display_date" value="2">
-					<label for="display_date">Day/Month</label>
+					<label for="display_date">dd MM</label>
 					<input onchange="elementChange(this);" type="radio" name="time_or_date" id="display_year" value="3">
-					<label for="display_year">Month/Year</label>
+					<label for="display_year">MM-yy</label>
 				</fieldset>
 			</div>
 			<div class="clearFloats"></div>
@@ -42,6 +42,42 @@
 					<option value="0">DD-MM</option>
 					<option value="1">MM-DD</option>
 				</select>
+			</div>
+			<div class="clearFloats"></div>
+			<div class="dispInlineLabel">
+				<label for="effect_type">Transition</label>
+			</div>
+			<div class="dispInline">
+				<fieldset data-role="controlgroup" data-type="horizontal" data-mini="true" id="effect_type">
+					<input onchange="elementChange(this);setVisibility('ripple_container', this, ['2']);" type="radio" name="effect" id="effect_none" value="0">
+					<label for="effect_none">None</label>
+					<input onchange="elementChange(this);setVisibility('ripple_container', this, ['2']);" type="radio" name="effect" id="effect_fade" value="1">
+					<label for="effect_fade">Fade</label>
+					<input onchange="elementChange(this);setVisibility('ripple_container', this, ['2']);" type="radio" name="effect" id="effect_ripple" value="2">
+					<label for="effect_ripple">Ripple</label>
+				</fieldset>
+			</div>
+			<div id="ripple_container" style="display: none;">
+				<div class="clearFloats"></div>
+				<div class="dispInlineLabel">
+					<label for="ripple_direction">Direction</label>
+				</div>
+				<div class="dispInline">
+					<input onchange="elementChange(this)" type="checkbox"
+						data-role="flipswitch" name="ripple_direction" id="ripple_direction"
+						data-on-text="⇨" data-off-text="⇦"
+						data-wrapper-class="custom-label-flipswitch">
+				</div>
+				<div class="clearFloats"></div>
+				<div class="dispInlineLabel">
+					<label for="ripple_speed">Speed</label>
+				</div>
+				<div class="dispInline">
+					<input onchange="elementChange(this)" type="checkbox"
+						data-role="flipswitch" name="ripple_speed" id="ripple_speed"
+						data-on-text="Fast" data-off-text="Slow"
+						data-wrapper-class="custom-label-flipswitch">
+				</div>
 			</div>
 			<div class="clearFloats"></div>
 			<div class="dispInlineLabel">
@@ -70,12 +106,6 @@
 			<div class="clearFloats"></div>
 			Look <a target="_blank" rel="noopener noreferrer" href="https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv">here</a>
 			for a full list of strings (use the value in the second column)
-			<div class="clearFloats"></div>
-			<div data-role="fieldcontain">
-				<label for="command">Arbitrary command</label> <input maxlength="80"
-					onblur="elementBlur(this);return false;" type="text" id="command"
-					data-mini="true" />
-			</div>
 		</form>
 	</div>
 </div>
