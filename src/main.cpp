@@ -27,7 +27,7 @@
 #include "time.h"
 #include "sys/time.h"
 
-#define DEBUG(...) { Serial.println(__VA_ARGS__); }
+#define TIME_FLIES_TAG "TIME_FLIES"
 
 #define OTA
 #define MAX_MSG_SIZE 40
@@ -189,7 +189,7 @@ void createSSID() {
 uint32_t cmdDelay = 1000;
 
 void asyncTimeSetCallback(String time) {
-	DEBUG(time);
+	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
 
 	struct tm now;
 	suseconds_t uSec;
@@ -404,47 +404,6 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 	setLights(item, baselightsBlueTemplates);
 }
 
-static const char* spp_data[] = {
-  //"0x13,$PRO0***",  // Profile 0
-  "0x13,$PSU,6,4,17,6***", //	Timezone
-  "0x13,$BIT13,0***", //	DST off
-  //"0x13,$BIT13,1***", //	DST on
-  "0x13,$BIT8,1***", //12 hour mode
-  // "0x13,$TIM,22,40,45,16,01,25***", // Time hh,mm,ss,dd,mm,yy
-  "0x13,$DIM,23,59,6,0,3***", //	Dimming 3
-  "0x13,$BIT12,1***", //  MM/DD
-  // Tube underlights
-  "0x13,$LED2,B,9***",
-  "0x13,$LED2,G,12***",
-  "0x13,$LED3,B,9***",
-  "0x13,$LED3,G,12***",
-  "0x13,$LED4,B,9***",
-  "0x13,$LED4,G,12***",
-  "0x13,$LED5,B,9***",
-  "0x13,$LED5,G,12***",
-  "0x13,$LED6,B,9***",
-  "0x13,$LED6,G,12***",
-  //underside
-  "0x13,$LED1,B,15***",
-  "0x13,$LED8,B,15***",
-
-//   "0x13,$LED1,R,15***",
-//   "0x13,$LED8,R,15***",
-
-  "0x13,$LED1,G,15***",
-  "0x13,$LED8,G,15***",
-
-  //base
-  "0x13,$LED9,B,5***",
-  "0x13,$LED9,G,1***",
-  "0x13,$LED9,R,0***",
-  "0x13,$LED10,B,5***",
-  "0x13,$LED10,G,1***",
-  "0x13,$LED10,R,0***",
-
-  0
-};
-
 SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
 void initSPP() {
@@ -457,10 +416,10 @@ void initSPP() {
             if (btGAP.init()) {
 				connectionStatus = NOT_CONNECTED;
             } else {
-                Serial.printf("GAP initialization failed: %s", btGAP.getErrMessage().c_str());
+                ESP_LOGE(TIME_FLIES_TAG, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
             }
         } else {
-            Serial.printf("BT initialization failed: %s", btSPP.getErrMessage().c_str());
+            ESP_LOGE(TIME_FLIES_TAG, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
         }
     }
 }
@@ -486,7 +445,7 @@ void sppTaskFn(void *pArg) {
 				delay(delayNextMsg);
 				btSPP.write(msg);
 				if (btSPP.isError()) {
-					Serial.printf("Error writing message: %s", btSPP.getErrMessage());
+					ESP_LOGE(TIME_FLIES_TAG, "Error writing message: %s", btSPP.getErrMessage());
 				}
 			}
 			delayNextMsg = cmdDelay;
@@ -531,7 +490,7 @@ void sppTaskFn(void *pArg) {
             } else {
 				connectionStatus = SEARCHING;
 				if (!btGAP.startInquiry()) {
-					Serial.printf("Error starting inqury: %s", btGAP.getErrMessage());
+					ESP_LOGE(TIME_FLIES_TAG, "Error starting inqury: %s", btGAP.getErrMessage());
 					connectionStatus = NOT_CONNECTED;
 				}
 			}
@@ -656,7 +615,8 @@ void updateValue(String originalKey, String _key, String value, BaseConfigItem *
 
 void updateValue(int screen, String pair) {
 	int index = pair.indexOf(':');
-	DEBUG(pair)
+	ESP_LOGD(TIME_FLIES_TAG, "Pair: %s", pair.c_str());
+
 	// _key has to hang around because key points to an internal data structure
 	String _key = pair.substring(0, index);
 	String value = pair.substring(index+1);
@@ -688,45 +648,38 @@ void wsHandler(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
 	//Handle WebSocket event
 	switch (type) {
 	case WS_EVT_CONNECT:
-		DEBUG("WS connected")
-		;
+		ESP_LOGD(TIME_FLIES_TAG, "WS connected");
 		break;
 	case WS_EVT_DISCONNECT:
-		DEBUG("WS disconnected")
-		;
+		ESP_LOGD(TIME_FLIES_TAG, "WS disconnected");
 		break;
 	case WS_EVT_ERROR:
-		DEBUG("WS error")
-		;
-		DEBUG((char* )data)
-		;
+		ESP_LOGD(TIME_FLIES_TAG, "WS Error, data: %s", (char* )data);
 		break;
 	case WS_EVT_PONG:
-		DEBUG("WS pong")
-		;
+		ESP_LOGD(TIME_FLIES_TAG, "WS pong");
 		break;
 	case WS_EVT_DATA:	// Yay we got something!
-		DEBUG("WS data")
-		;
+		ESP_LOGD(TIME_FLIES_TAG, "WS data");
 		AwsFrameInfo * info = (AwsFrameInfo*) arg;
 		if (info->final && info->index == 0 && info->len == len) {
 			//the whole message is in a single frame and we got all of it's data
 			if (info->opcode == WS_TEXT) {
-				DEBUG("WS text data");
+				ESP_LOGD(TIME_FLIES_TAG, "WS text data");
 				data[len] = 0;
 				handleWSMsg(client, reinterpret_cast<const char*>(data));
 			} else {
-				DEBUG("WS binary data");
+				ESP_LOGD(TIME_FLIES_TAG, "WS binary data");
 			}
 		} else {
-			DEBUG("WS data was split up!");
+			ESP_LOGD(TIME_FLIES_TAG, "WS data was split up!");
 		}
 		break;
 	}
 }
 
 void mainHandler(AsyncWebServerRequest *request) {
-	DEBUG("Got request")
+	ESP_LOGD(TIME_FLIES_TAG, "Got request");
 	request->send(LittleFS, "/index.html");
 }
 
@@ -745,7 +698,7 @@ void sendUpdatingInfo(AsyncResponseStream *response, boolean hasError) {
 }
 
 void sendFavicon(AsyncWebServerRequest *request) {
-	DEBUG("Got favicon request")
+	ESP_LOGD(TIME_FLIES_TAG, "Got favicon request");
 	request->send(LittleFS, "/assets/favicon-32x32.png", "image/png");
 }
 
@@ -767,7 +720,7 @@ void configureWebServer() {
 }
 
 void connectedHandler() {
-	DEBUG("connectedHandler");
+	ESP_LOGD(TIME_FLIES_TAG, "connectedHandler");
 
 	MDNS.end();
 	MDNS.begin(hostName.value.c_str());
@@ -775,8 +728,7 @@ void connectedHandler() {
 }
 
 void apChange(AsyncWiFiManager *wifiManager) {
-	DEBUG("apChange()");
-	DEBUG(wifiManager->isAP());
+	ESP_LOGD(TIME_FLIES_TAG, "apChange(), isAP: %d", wifiManager->isAP());
 	if (!wifiManager->isAP()) {
 		xQueueSend(sppQueue, "", 0);
 	}
@@ -791,13 +743,13 @@ void setWiFiAP(bool on) {
 }
 
 void setupServer() {
-	DEBUG("setupServer()");
+	ESP_LOGD(TIME_FLIES_TAG, "setupServer()");
 	hostName = String(hostnameParam->getValue());
 	hostName.put();
 	config.commit();
 	createSSID();
 	wifiManager.setAPCredentials(ssid.c_str(), "secretsauce");
-	DEBUG(hostName.value.c_str());
+	ESP_LOGD(TIME_FLIES_TAG, "Hostname: %s", hostName.value.c_str());
 	MDNS.begin(hostName.value.c_str());
 	MDNS.addService("http", "tcp", 80);
 }
@@ -815,7 +767,7 @@ void wifiManagerTaskFn(void *pArg) {
 void commitEEPROMTaskFn(void *pArg) {
 	while(true) {
 		delay(60000);
-		Serial.println("Committing config");
+		ESP_LOGD(TIME_FLIES_TAG, "Committing config");
 		config.commit();
 	}
 }
@@ -824,9 +776,9 @@ void initFromEEPROM() {
 //	config.setDebugPrint(debugPrint);
 	config.init();
 //	rootConfig.debug(debugPrint);
-	DEBUG(hostName);
+	ESP_LOGD(TIME_FLIES_TAG, "Hostname: %s", hostName.value.c_str());
 	rootConfig.get();	// Read all of the config values from EEPROM
-	DEBUG(hostName);
+	ESP_LOGD(TIME_FLIES_TAG, "Hostname: %s", hostName.value.c_str());
 
 	hostnameParam = new AsyncWiFiManagerParameter("Hostname", "device host name", hostName.value.c_str(), 63);
 }
@@ -895,7 +847,7 @@ void setup() {
 	LEDs::getBaselightGreen().setCallback(onGreenBaselightsChanged);
 	LEDs::getBaselightBlue().setCallback(onBlueBaselightsChanged);
 
-    wifiManager.setDebugOutput(true);
+    // wifiManager.setDebugOutput(true);
     wifiManager.setHostname(hostName.value.c_str()); // name router associates DNS entry with
     wifiManager.setCustomOptionsHTML("<br><form action='/t' name='time_form' method='post'><button name='time' onClick=\"{var now=new Date();this.value=now.getFullYear()+','+(now.getMonth()+1)+','+now.getDate()+','+now.getHours()+','+now.getMinutes()+','+now.getSeconds();} return true;\">Set Clock Time</button></form><br><form action=\"/app.html\" method=\"get\"><button>Configure Clock</button></form>");
     wifiManager.addParameter(hostnameParam);
@@ -919,10 +871,7 @@ void setup() {
 
 	hostName.setCallback(onHostnameChanged);
 
-    Serial.print("setup() running on core ");
-    Serial.println(xPortGetCoreID());
-
-	Serial.printf("LWIP_TCP_RTO_TIME=%d", LWIP_TCP_RTO_TIME);
+    ESP_LOGD(TIME_FLIES_TAG, "setup() running on core %d", xPortGetCoreID());
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }

@@ -15,7 +15,7 @@ BTSPP::BTSPP(const std::string& name) {
 
 bool BTSPP::init() {
     if (self == 0) {
-        ESP_LOGI(BT_SPP_TAG, "Initializing SPP");
+        ESP_LOGD(BT_SPP_TAG, "Initializing SPP");
         self = this;
         err = 0;
         err = ESP_OK;
@@ -65,7 +65,7 @@ bool BTSPP::init() {
             return false;
         }
 
-        ESP_LOGI(BT_SPP_TAG, "Enabled bluedroid");
+        ESP_LOGD(BT_SPP_TAG, "Enabled bluedroid");
 
         if ((err = esp_bt_dev_set_device_name(name.c_str())) != ESP_OK) {
             errMsg = "Failed to set device name: ";
@@ -95,10 +95,10 @@ bool BTSPP::init() {
             return false;
         }
 #endif
-        ESP_LOGI(BT_SPP_TAG, "Inited SPP");
+        ESP_LOGD(BT_SPP_TAG, "Inited SPP");
     }
 
-    ESP_LOGI(BT_SPP_TAG, "SPP init returning true");
+    ESP_LOGD(BT_SPP_TAG, "SPP init returning true");
     return true;
 }
 
@@ -130,7 +130,7 @@ void BTSPP::startConnection(uint8_t *address) {
     bda_str[0] = 'b';
 
     bda2str(address, bda_str, sizeof(bda_str));
-    ESP_LOGI(BT_SPP_TAG, "Connecting to %s", bda_str);
+    ESP_LOGD(BT_SPP_TAG, "Connecting to %s", bda_str);
 
     if ((err = esp_spp_start_discovery(address)) != ESP_OK) {
         errMsg = esp_err_to_name(err);
@@ -141,7 +141,7 @@ void BTSPP::startConnection(uint8_t *address) {
 void BTSPP::write(const std::string& msg) {
     if (msg.length() < MAX_STRING_LENGTH) {
         strcpy(writeBuf, msg.c_str());
-        ESP_LOGI(BT_SPP_TAG, "Writing message '%s' of length %d to %d", writeBuf, strlen(writeBuf), peerHandle);
+        ESP_LOGD(BT_SPP_TAG, "Writing message '%s' of length %d to %d", writeBuf, strlen(writeBuf), peerHandle);
         writeDone = false;
         bufPtr = writeBuf;
         if ((err = esp_spp_write(peerHandle, msg.length(), (uint8_t*)writeBuf)) != ESP_OK) {
@@ -160,7 +160,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
     switch (event) {
     case ESP_SPP_INIT_EVT:
         if (param->init.status == ESP_SPP_SUCCESS) {
-            ESP_LOGI(BT_SPP_TAG, "ESP_SPP_INIT_EVT");
+            ESP_LOGD(BT_SPP_TAG, "ESP_SPP_INIT_EVT");
             initDone=true;
         } else {
             ESP_LOGE(BT_SPP_TAG, "ESP_SPP_INIT_EVT status:%d", param->init.status);
@@ -169,9 +169,9 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 
     case ESP_SPP_DISCOVERY_COMP_EVT:
         if (param->disc_comp.status == ESP_SPP_SUCCESS) {
-            ESP_LOGI(BT_SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT scn_num:%d", param->disc_comp.scn_num);
+            ESP_LOGD(BT_SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT scn_num:%d", param->disc_comp.scn_num);
             for (i = 0; i < param->disc_comp.scn_num; i++) {
-                ESP_LOGI(BT_SPP_TAG, "-- [%d] scn:%d service_name:%s", i, param->disc_comp.scn[i],
+                ESP_LOGD(BT_SPP_TAG, "-- [%d] scn:%d service_name:%s", i, param->disc_comp.scn[i],
                          param->disc_comp.service_name[i]);
             }
             /* We only connect to the first found server on the remote SPP acceptor here */
@@ -182,7 +182,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         break;
     case ESP_SPP_OPEN_EVT:
         if (param->open.status == ESP_SPP_SUCCESS) {
-            ESP_LOGI(BT_SPP_TAG, "ESP_SPP_OPEN_EVT handle:%d", param->open.handle);
+            ESP_LOGD(BT_SPP_TAG, "ESP_SPP_OPEN_EVT handle:%d", param->open.handle);
             connectDone = true;
             peerHandle = param->open.handle;
         } else {
@@ -190,30 +190,30 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         }
         break;
     case ESP_SPP_CLOSE_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_CLOSE_EVT status:%d handle:%d close_by_remote:%d", param->close.status,
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_CLOSE_EVT status:%d handle:%d close_by_remote:%d", param->close.status,
                  param->close.handle, param->close.async);
         connectDone = false;
         break;
     case ESP_SPP_START_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_START_EVT");
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_START_EVT");
         break;
     case ESP_SPP_CL_INIT_EVT:
         if (param->cl_init.status == ESP_SPP_SUCCESS) {
-            ESP_LOGI(BT_SPP_TAG, "ESP_SPP_CL_INIT_EVT handle:%d sec_id:%d", param->cl_init.handle, param->cl_init.sec_id);
+            ESP_LOGD(BT_SPP_TAG, "ESP_SPP_CL_INIT_EVT handle:%d sec_id:%d", param->cl_init.handle, param->cl_init.sec_id);
         } else {
             ESP_LOGE(BT_SPP_TAG, "ESP_SPP_CL_INIT_EVT status:%d", param->cl_init.status);
         }
         break;
     case ESP_SPP_DATA_IND_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_DATA_IND_EVT");
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_DATA_IND_EVT");
         break;
     case ESP_SPP_WRITE_EVT:
         if (param->write.status == ESP_SPP_SUCCESS) {
             if (bufPtr[param->write.len] == 0) {
                 writeDone = true;
-                ESP_LOGI(BT_SPP_TAG, "Wrote all data, len=%d", param->write.len);
+                ESP_LOGD(BT_SPP_TAG, "Wrote all data, len=%d", param->write.len);
             } else {
-                ESP_LOGI(BT_SPP_TAG, "Wrote %d bytes, cong=%d", param->write.len, param->write.cong);
+                ESP_LOGD(BT_SPP_TAG, "Wrote %d bytes, cong=%d", param->write.len, param->write.cong);
                 /*
                  * Means the previous data packet only sent partially due to lower layer congestion, resend the
                  * remainning data.
@@ -223,10 +223,10 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
                     /* The lower layer is not congested, you can send the next data packet now. */
                     if (*bufPtr == 0) {
                         writeDone = true;
-                        ESP_LOGI(BT_SPP_TAG, "All data was really sent");
+                        ESP_LOGD(BT_SPP_TAG, "All data was really sent");
                         return;   // All sent anyway
                     }
-                    ESP_LOGI(BT_SPP_TAG, "Attempting to write remainder");
+                    ESP_LOGD(BT_SPP_TAG, "Attempting to write remainder");
                     esp_spp_write(peerHandle, strlen(bufPtr), (uint8_t*)bufPtr);
                 }
             }
@@ -238,7 +238,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         }
         break;
     case ESP_SPP_CONG_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_CONG_EVT cong:%d", param->cong.cong);
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_CONG_EVT cong:%d", param->cong.cong);
         if (param->cong.cong == 0) {
             /* Send the previous (partial) data packet or the next data packet. */
             if (*bufPtr == 0) {
@@ -249,10 +249,10 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         }
         break;
     case ESP_SPP_SRV_OPEN_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
         break;
     case ESP_SPP_UNINIT_EVT:
-        ESP_LOGI(BT_SPP_TAG, "ESP_SPP_UNINIT_EVT");
+        ESP_LOGD(BT_SPP_TAG, "ESP_SPP_UNINIT_EVT");
         break;
     default:
         break;
