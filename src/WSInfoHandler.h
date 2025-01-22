@@ -13,7 +13,7 @@ public:
     {
 	}
 
-	virtual void handle(AsyncWebSocketClient *client, char *data);
+	virtual void handle(AsyncWebSocketClient *client, const char *data);
 
     void setFSFree(const String& free) {
         fsFree = free;

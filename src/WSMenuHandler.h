@@ -8,7 +8,7 @@
 class WSMenuHandler : public WSHandler {
 public:
 	WSMenuHandler(String **items) : items(items) { }
-	virtual void handle(AsyncWebSocketClient *client, char *data);
+	virtual void handle(AsyncWebSocketClient *client, const char *data);
 	void setItems(String **items);
 
 	static String clockMenu;

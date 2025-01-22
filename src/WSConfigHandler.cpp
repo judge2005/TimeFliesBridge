@@ -1,14 +1,14 @@
 #include <WSConfigHandler.h>
 
-void WSConfigHandler::handle(AsyncWebSocketClient *client, char *data) {
+void WSConfigHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	client->text(getData(data));
 }
 
-void WSConfigHandler::broadcast(AsyncWebSocket &ws, char *data) {
+void WSConfigHandler::broadcast(AsyncWebSocket &ws, const char *data) {
 	ws.textAll(getData(data));
 }
 
-String WSConfigHandler::getData(char *data) {
+String WSConfigHandler::getData(const char *data) {
 	String json("{\"type\":\"sv.init.");
 	json.concat(name);
 	json.concat("\", \"value\":{");

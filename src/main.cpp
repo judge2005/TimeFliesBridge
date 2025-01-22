@@ -616,18 +616,16 @@ void broadcastUpdate(String originalKey, const BaseConfigItem& item) {
 	xSemaphoreTake(wsMutex, portMAX_DELAY);
 
 	JsonDocument doc;
-	JsonObject root = doc.to<JsonObject>();
-
-	root["type"] = "sv.update";
-
-	JsonVariant value = root.createNestedObject("value");
+	doc["type"] = "sv.update";
+	
 	String rawJSON = item.toJSON();	// This object needs to hang around until we are done serializing.
-	value[originalKey] = serialized(rawJSON.c_str());
+	doc["value"][originalKey] = serialized(rawJSON.c_str());
 
-	size_t len = measureJson(root);
+	size_t len = measureJson(doc);
+
 	AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len); //  creates a buffer (len + 1) for you.
 	if (buffer) {
-		serializeJson(root, (char *)buffer->get(), len + 1);
+		serializeJson(doc, (char *)buffer->get(), len);
 		ws.textAll(buffer);
 	}
 
@@ -669,7 +667,7 @@ void updateValue(int screen, String pair) {
 /*
  * Handle application protocol
  */
-void handleWSMsg(AsyncWebSocketClient *client, char *data) {
+void handleWSMsg(AsyncWebSocketClient *client, const char *data) {
 	String wholeMsg(data);
 	int code = wholeMsg.substring(0, wholeMsg.indexOf(':')).toInt();
 
@@ -716,7 +714,7 @@ void wsHandler(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
 			if (info->opcode == WS_TEXT) {
 				DEBUG("WS text data");
 				data[len] = 0;
-				handleWSMsg(client, (char *) data);
+				handleWSMsg(client, reinterpret_cast<const char*>(data));
 			} else {
 				DEBUG("WS binary data");
 			}

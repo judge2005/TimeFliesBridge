@@ -25,7 +25,7 @@ static uint32_t sketchSize(sketchSize_t response) {
     }
 }
     
-void WSInfoHandler::handle(AsyncWebSocketClient *client, char *data) {
+void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	cbFunc();
 
 	// static Uptime uptime;

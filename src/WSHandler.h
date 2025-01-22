@@ -4,7 +4,7 @@
 
 class WSHandler {
 public:
-	virtual void handle(AsyncWebSocketClient *client, char *data) = 0;
+	virtual void handle(AsyncWebSocketClient *client, const char *data) = 0;
 };
 
 

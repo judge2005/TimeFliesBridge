@@ -20,13 +20,13 @@ public:
 		name(name) {
 	}
 
-	virtual void handle(AsyncWebSocketClient *client, char *data);
-	virtual void broadcast(AsyncWebSocket &ws, char *data);
+	virtual void handle(AsyncWebSocketClient *client, const char *data);
+	virtual void broadcast(AsyncWebSocket &ws, const char *data);
 
 private:
 	CbFunc cbFunc;
 
-	String getData(char *data);
+	String getData(const char *data);
 	
 	BaseConfigItem& rootConfig;
 	const char *name;
