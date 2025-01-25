@@ -7,12 +7,29 @@
 	</div>
 	<div data-role="content">
 		<form action="/set_extra" method="POST" id="extra_form">
-			<div class="clearFloats"></div>
 			<div data-role="fieldcontain">
-				<label for="command">Arbitrary command</label> <input maxlength="80"
-					onblur="elementBlur(this);return false;" type="text" id="command"
-					data-mini="true" />
+				<div data-role="fieldcontain">
+					<label for="command">Arbitrary command</label> <input maxlength="80"
+						onblur="elementBlur(this);return false;" type="text" id="command"
+						data-mini="true" />
+				</div>
 			</div>
+			<div class="clearFloats"></div>
+				<div data-role="dispInlineLabel">
+					<label for="push_all_values">&nbsp;</label>
+				</div>
+				<div data-role="dispInlineLabel">
+					<input onclick="elementChange(this, true)" data-mini="true" id="push_all_values" type="button" value="Push All Values"/>
+				</div>
+				<div class="clearFloats"></div>
+				<div>&nbsp</div>
+				<fieldset id="console" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
+				<legend>Console</legend>
+				<div class="console-wrapper">
+					<div id="console_data" class="console-div">
+					</div>
+				</div>
+			</fieldset>
 		</form>
 	</div>
 </div>

@@ -30,40 +30,38 @@ void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 
 	// static Uptime uptime;
 	JsonDocument doc;
-	JsonObject root = doc.to<JsonObject>();
 
-	root["type"] = "sv.init.info";
+	doc["type"] = "sv.init.info";
 	size_t freeHeap = ESP.getFreeHeap();
 	size_t free8bitHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
 	size_t freeIRAMHeap = freeHeap - free8bitHeap;
 
-	JsonVariant value = root.createNestedObject("value");
-	value["esp_free_iram_heap"] = freeIRAMHeap;
-	value["esp_free_heap"] = free8bitHeap;
-	value["esp_free_heap_min"] = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
-	value["esp_max_alloc_heap"] = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-	value["esp_sketch_size"] = sketchSize(SKETCH_SIZE_TOTAL);
-	value["esp_sketch_space"] = sketchSize(SKETCH_SIZE_FREE);
+	doc["value"]["esp_free_iram_heap"] = freeIRAMHeap;
+	doc["value"]["esp_free_heap"] = free8bitHeap;
+	doc["value"]["esp_free_heap_min"] = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+	doc["value"]["esp_max_alloc_heap"] = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+	doc["value"]["esp_sketch_size"] = sketchSize(SKETCH_SIZE_TOTAL);
+	doc["value"]["esp_sketch_space"] = sketchSize(SKETCH_SIZE_FREE);
 
-	value["esp_chip_id"] = String(ESP.getChipRevision(), HEX);
+	doc["value"]["esp_chip_id"] = String(ESP.getChipRevision(), HEX);
 
-	value["wifi_ip_address"] = WiFi.localIP().toString();
-	value["wifi_mac_address"] = WiFi.macAddress();
-	value["wifi_ssid"] = WiFi.SSID();
-	value["wifi_ap_ssid"] = ssid;
-	value["hostname"] = hostname;
-	value["software_revision"] = revision;
+	doc["value"]["wifi_ip_address"] = WiFi.localIP().toString();
+	doc["value"]["wifi_mac_address"] = WiFi.macAddress();
+	doc["value"]["wifi_ssid"] = WiFi.SSID();
+	doc["value"]["wifi_ap_ssid"] = ssid;
+	doc["value"]["hostname"] = hostname;
+	doc["value"]["software_revision"] = revision;
 
-    value["fs_size"] = fsSize;
-    value["fs_free"] = fsFree;
-	value["brightness"] = brightness;
-	value["triggered"] = triggered;
-	value["clock_on"] = clockOn;
+    doc["value"]["fs_size"] = fsSize;
+    doc["value"]["fs_free"] = fsFree;
+	doc["value"]["brightness"] = brightness;
+	doc["value"]["triggered"] = triggered;
+	doc["value"]["clock_on"] = clockOn;
 
 	// value["up_time"] = uptime.uptime();
-	value["sync_time"] = lastUpdateTime;
-	value["sync_failed_msg"] = lastFailedMessage;
-	value["sync_failed_cnt"] = failedCount;
+	doc["value"]["sync_time"] = lastUpdateTime;
+	doc["value"]["sync_failed_msg"] = lastFailedMessage;
+	doc["value"]["sync_failed_cnt"] = failedCount;
 
 	// if (pBlankingMonitor) {
 	// 	value["on_time"] = pBlankingMonitor->onTime();
@@ -71,7 +69,7 @@ void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	// }
 
 	String serializedJSON;
-	serializeJson(root, serializedJSON);
+	serializeJson(doc, serializedJSON);
 	client->text(serializedJSON);
 }
 

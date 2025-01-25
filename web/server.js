@@ -149,24 +149,23 @@ var updateValue = function(conn, screen, pair) {
 	broadcastUpdate(conn, key, state[screen][key]);
 }
 
-var updateHue = function(conn) {
-	// var hue = state['2']['led_hue'];
-	// hue = (hue + 5) % 256;
-	// updateValue(conn, 2, "led_hue:" + hue);
+var consoleData = [];
+var valCount = 0;
 
-	// var intensity = state['2']['led_value'];
-	// intensity = (intensity + 2) % 256;
-	// updateValue(conn, 2, "led_value:" + intensity);
-	// var val = state['1']['time_or_date'];
-	// val = (val + 1) % 3;
-	// updateValue(conn, 1, "time_or_date:" + val)
+var updateConsole = function(conn) {
+	if (consoleData.length === 20) {
+		consoleData.shift(); // Remove the first (oldest) element
+	}
+	consoleData.push("This is a very long value that will hopefull overflow the right hand side value <high> " + ++valCount);
+
+	broadcastUpdate(conn, "console_data", consoleData);
 }
 
 wss.on('connection', function(conn) {
 	wssConn = conn;
 
     console.log('connected');
-	var hueTimer = setInterval(updateHue, 500, conn);
+	var hueTimer = setInterval(updateConsole, 2000, conn);
 
     //connection is up, let's add a simple simple event
 	conn.on('message', function(data, isBinary) {

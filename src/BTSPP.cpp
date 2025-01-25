@@ -1,4 +1,5 @@
 #include <BTSPP.h>
+#include <esp_arduino_version.h>
 #include <esp_bt.h>
 #include <esp_bt_main.h>
 #include <esp_bt_device.h>

@@ -4,6 +4,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+#include "esp_mac.h"
+#endif
 #include "BTSPP.h"
 #include "BTGAP.h"
 #include <esp_wifi.h>
@@ -31,6 +34,7 @@
 
 #define OTA
 #define MAX_MSG_SIZE 40
+#define SPP_QUEUE_SIZE 40
 
 const char *manifest[]{
     // Firmware name
@@ -42,6 +46,9 @@ const char *manifest[]{
     // Device name
     "Time Flies"
 };
+
+void broadcastUpdate(String originalKey, const BaseConfigItem& item);
+void broadcastUpdate(const JsonDocument &doc);
 
 struct LongConfigItem : public ConfigItem<uint64_t> {
 	LongConfigItem(const char *name, const uint64_t value)
@@ -65,6 +72,127 @@ void ConfigItem<T>::debug(Print *debugPrint) const {
 	}
 }
 template void ConfigItem<uint64_t>::debug(Print *debugPrint) const;
+
+#define LOG_ENTRY_SIZE 100
+#define MAX_LOG_ENTRIES 20
+
+typedef enum {
+	ERROR = 1,
+	WARN,
+	INFO,
+	DEBUG,
+	VERBOSE
+} LogLevel;
+
+class Logger {
+public:
+	static void log(LogLevel lvl, const char *format, ...) {
+		va_list args;
+		va_start(args, format);
+		vsnprintf(logBuffer[endLogIndex], LOG_ENTRY_SIZE, format, args);
+		
+		switch (lvl) {
+			case ERROR:
+				ESP_LOGE(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				break;
+
+			case WARN:
+				ESP_LOGW(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				break;
+
+			case INFO:
+				ESP_LOGI(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				break;
+
+			case DEBUG:
+				ESP_LOGD(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				break;
+
+			case VERBOSE:
+				ESP_LOGV(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				break;
+		}
+
+		endLogIndex = (endLogIndex + 1) % MAX_LOG_ENTRIES;
+		numLogEntries = min(++numLogEntries, MAX_LOG_ENTRIES);
+
+		if (numLogEntries == MAX_LOG_ENTRIES) {
+			startLogIndex = (endLogIndex + 1) % MAX_LOG_ENTRIES;
+		}
+
+		broadcastUpdate();
+
+		va_end(args); 
+	}
+
+	static String escape_json(const char *s) {
+		String ret("\"");
+		ret.reserve(strlen(s) + 10);
+		const char *start = s;
+		const char *end = start + strlen(s);
+		for (const char *c = start; c != end; c++) {
+			switch (*c) {
+			case '"': ret += "\\\""; break;
+			case '\\': ret += "\\\\"; break;
+			case '\b': ret += "\\b"; break;
+			case '\f': ret += "\\f"; break;
+			case '\n': ret += "\\n"; break;
+			case '\r': ret += "\\r"; break;
+			case '\t': ret += "\\t"; break;
+			default:
+				if ('\x00' <= *c && *c <= '\x1f') {
+					char buf[10];
+					sprintf(buf, "\\u%04x", (int)*c);
+					ret += buf;
+				} else {
+					ret += *c;
+				}
+			}
+		}
+		ret += "\"";
+
+		return ret;
+	}
+
+	static String getSerializedJsonLog() {
+		char *comma = ",";
+		String s = ",\"console_data\":[";
+		char *sep = "";
+		if (numLogEntries > 0) {
+			for (int count=0, index=startLogIndex; count < numLogEntries; count++, index = (index+1) % MAX_LOG_ENTRIES) {
+				s += sep;
+				s += escape_json(logBuffer[index]);
+				sep = comma;
+			}
+
+			s += "]";
+		}
+		return s;
+	}
+
+	static void broadcastUpdate() {
+		if (numLogEntries > 0) {
+			JsonDocument doc;
+			doc["type"] = "sv.update";
+			for (int count=0, index=startLogIndex; count < numLogEntries; count++, index = (index+1) % MAX_LOG_ENTRIES) {
+				doc["value"]["console_data"][index] = logBuffer[index];
+			}
+
+			::broadcastUpdate(doc);
+		}
+	}
+
+private:
+	static int startLogIndex;
+	static int endLogIndex;
+	static int numLogEntries;
+	static char logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE];
+};
+
+int Logger::startLogIndex = 0;
+int Logger::endLogIndex = 0;
+int Logger::numLogEntries = 0;
+char Logger::logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE] = {};
 
 typedef enum {
 	NOT_INITIALIZED = 0,
@@ -94,7 +222,7 @@ TaskHandle_t clockTask;
 TaskHandle_t wifiManagerTask;
 
 SemaphoreHandle_t wsMutex;
-QueueHandle_t sppQueue;;
+QueueHandle_t sppQueue;
 
 String ssid = "TFB";
 
@@ -107,7 +235,6 @@ BaseConfigItem* clockSet[] {
 	&TimeFliesClock::getDisplayOff(),
 	&TimeFliesClock::getOffStateOff(),
 	&TimeFliesClock::getTimeZone(),
-	&TimeFliesClock::getCommand(),
 	&TimeFliesClock::getEffect(),
 	&TimeFliesClock::getRippleDirection(),
 	&TimeFliesClock::getRippleSpeed(),
@@ -137,6 +264,13 @@ BaseConfigItem* ledsSet[] {
 
 CompositeConfigItem ledsConfig("leds", 0, ledsSet);
 
+BaseConfigItem* extraSet[] {
+	&TimeFliesClock::getCommand(),
+	0
+};
+
+CompositeConfigItem extraConfig("extra", 0, extraSet);
+
 // Global configuration
 BaseConfigItem* configSetGlobal[] = {
 	&hostName,
@@ -150,6 +284,7 @@ BaseConfigItem* rootConfigSet[] = {
     &globalConfig,
 	&clockConfig,
 	&ledsConfig,
+	&extraConfig,
     0
 };
 
@@ -161,7 +296,6 @@ EEPROMConfig config(rootConfig);
 void setWiFiCredentials(const char *ssid, const char *password);
 void setWiFiAP(bool);
 void infoCallback();
-void broadcastUpdate(String originalKey, const BaseConfigItem& item);
 
 template<class T>
 void onHostnameChanged(ConfigItem<T> &item) {
@@ -202,6 +336,16 @@ void asyncTimeSetCallback(String time) {
 	snprintf(msg, MAX_MSG_SIZE, "0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
 		now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
 	xQueueSend(sppQueue, msg, 0);
+}
+
+void pushAllValues() {
+	for (int i=0; ledsSet[i] != 0; i++) {
+		ledsSet[i]->notify();
+	}
+
+	for (int i=0; clockSet[i] != 0; i++) {
+		clockSet[i]->notify();
+	}
 }
 
 void sendCommands(const char *commands) {
@@ -416,10 +560,10 @@ void initSPP() {
             if (btGAP.init()) {
 				connectionStatus = NOT_CONNECTED;
             } else {
-                ESP_LOGE(TIME_FLIES_TAG, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
+                Logger::log(ERROR, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
             }
         } else {
-            ESP_LOGE(TIME_FLIES_TAG, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
+            Logger::log(ERROR, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
         }
     }
 }
@@ -428,10 +572,11 @@ void sppTaskFn(void *pArg) {
     static char msg[MAX_MSG_SIZE];
 
 	uint32_t delayNextMsg = 1;
-	uint32_t lastSendOnState = millis();
-
+	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
+	uint32_t maxWait = 1000;
+	delay(10000);
 	while(true) {
-		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(1000));
+		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
         if (!wifiManager.isAP()) {
             initSPP();
         }
@@ -443,9 +588,12 @@ void sppTaskFn(void *pArg) {
 			} else if (connectionStatus == CONNECTED) {
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
+
 				btSPP.write(msg);
 				if (btSPP.isError()) {
-					ESP_LOGE(TIME_FLIES_TAG, "Error writing message: %s", btSPP.getErrMessage());
+					Logger::log(ERROR, "Error writing message: %s", btSPP.getErrMessage());
+				} else {
+					Logger::log(INFO, "Sent: %s", msg);
 				}
 			}
 			delayNextMsg = cmdDelay;
@@ -454,28 +602,26 @@ void sppTaskFn(void *pArg) {
 			delayNextMsg = 1;
 		}
 
-		if (millis() - lastSendOnState >= 60000) {
-			lastSendOnState = millis();
-
-			if (connectionStatus == CONNECTED) {
-				// NOTE: sendCommands(...) just puts them on the queue
-				if (timeFliesClock.clockOn()) {
-					// Full brightness and on
-					sendCommands("0x13,$BIT4,0***;0x13,$BIT15,0***");
+		// NOTE: sendCommands(...) just puts them on the queue
+		if (timeFliesClock.clockOn() != wasOn) {
+			wasOn = timeFliesClock.clockOn();
+			if (wasOn) {
+				// Full brightness and on
+				sendCommands("0x13,$BIT4,0***;0x13,$BIT15,0***");
+			} else {
+				if (TimeFliesClock::getOffStateOff()) {
+					// Full brightness, but off
+					sendCommands("0x13,$BIT15,1***;0x13,$BIT4,0***");
 				} else {
-					if (TimeFliesClock::getOffStateOff()) {
-						// Full brightness, but off
-						sendCommands("0x13,$BIT15,1***;0x13,$BIT4,0***");
-					} else {
-						// Dim, but on
-						sendCommands("0x13,$BIT4,1***;0x13,$BIT15,0***");
-					}
+					// Dim, but on
+					sendCommands("0x13,$BIT4,1***;0x13,$BIT15,0***");
 				}
 			}
 		}
 
         if (connectionStatus == NOT_CONNECTED) {
             if (tfAddress != 0ULL) {
+				Logger::log(INFO, "Connecting to clock");
                 connectionStatus = CONNECTING;
                 uint64_t uAddress = tfAddress;
                 esp_bd_addr_t address = {0};
@@ -489,8 +635,9 @@ void sppTaskFn(void *pArg) {
                 btSPP.startConnection(address);
             } else {
 				connectionStatus = SEARCHING;
+				Logger::log(INFO, "Searching for clock");
 				if (!btGAP.startInquiry()) {
-					ESP_LOGE(TIME_FLIES_TAG, "Error starting inqury: %s", btGAP.getErrMessage());
+					Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
 					connectionStatus = NOT_CONNECTED;
 				}
 			}
@@ -516,18 +663,22 @@ void sppTaskFn(void *pArg) {
 
 		if (connectionStatus == CONNECTING) {
 			if (btSPP.connectionDone()) {
+				Logger::log(INFO, "Connected");
 				connectionStatus = CONNECTED;
 			}
 		}
 
 		if (connectionStatus == CONNECTED) {
+			heap_caps_check_integrity_all(true);
 			if (btSPP.connectionDone() == false) {
 				// We disconnected! Start again.
+				Logger::log(INFO, "Disconnected, reconnecting");
 				connectionStatus = NOT_CONNECTED;
 			}
 		}
 	}
 }
+
 
 String* items[] {
 	&WSMenuHandler::clockMenu,
@@ -540,7 +691,7 @@ String* items[] {
 WSMenuHandler wsMenuHandler(items);
 WSConfigHandler wsClockHandler(rootConfig, "clock");
 WSConfigHandler wsLEDsHandler(rootConfig, "leds");
-WSConfigHandler wsExtrasHandler(rootConfig, "extra");
+WSConfigHandler wsExtrasHandler(rootConfig, "extra", Logger::getSerializedJsonLog);
 WSInfoHandler wsInfoHandler(infoCallback);
 
 // Order of this needs to match the numbers in WSMenuHandler.cpp
@@ -571,15 +722,8 @@ void infoCallback() {
 	wsInfoHandler.setHostname(hostName);
 }
 
-void broadcastUpdate(String originalKey, const BaseConfigItem& item) {
+void broadcastUpdate(const JsonDocument &doc) {
 	xSemaphoreTake(wsMutex, portMAX_DELAY);
-
-	JsonDocument doc;
-	doc["type"] = "sv.update";
-	
-	String rawJSON = item.toJSON();	// This object needs to hang around until we are done serializing.
-	doc["value"][originalKey] = serialized(rawJSON.c_str());
-
 	size_t len = measureJson(doc);
 
 	AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len); //  creates a buffer (len + 1) for you.
@@ -589,6 +733,16 @@ void broadcastUpdate(String originalKey, const BaseConfigItem& item) {
 	}
 
 	xSemaphoreGive(wsMutex);
+}
+
+void broadcastUpdate(String originalKey, const BaseConfigItem& item) {
+	JsonDocument doc;
+	doc["type"] = "sv.update";
+	
+	String rawJSON = item.toJSON();	// This object needs to hang around until we are done serializing.
+	doc["value"][originalKey] = serialized(rawJSON.c_str());
+
+	broadcastUpdate(doc);
 }
 
 void updateValue(String originalKey, String _key, String value, BaseConfigItem *item) {
@@ -605,6 +759,8 @@ void updateValue(String originalKey, String _key, String value, BaseConfigItem *
 			item->notify();
 		} else if (_key == "wifi_ap") {
 			setWiFiAP(value == "true" ? true : false);
+		} else if (_key == "push_all_values") {
+			pushAllValues();
 		}
 	} else {
 		String firstKey = _key.substring(0, index);
@@ -796,7 +952,7 @@ void setup() {
     ESP_ERROR_CHECK(err);
 
 	wsMutex = xSemaphoreCreateMutex();
-    sppQueue = xQueueCreate(10, MAX_MSG_SIZE);
+    sppQueue = xQueueCreate(SPP_QUEUE_SIZE, MAX_MSG_SIZE);
  
 	createSSID();
 
@@ -815,15 +971,6 @@ void setup() {
         NULL,                 /* Task input parameter */
         tskIDLE_PRIORITY,     /* More than background tasks */
         &commitEEPROMTask,    /* Task handle. */
-        xPortGetCoreID());
-
-    xTaskCreatePinnedToCore(
-        sppTaskFn,   /* Function to implement the task */
-        "BT SPP task", /* Name of the task */
-        4096,                 /* Stack size in words */
-        NULL,                 /* Task input parameter */
-        tskIDLE_PRIORITY + 1,     /* More than background tasks */
-        &sppTask,    /* Task handle. */
         xPortGetCoreID());
 
 	timeFliesClock.setTimeSync(timeSync);
@@ -847,7 +994,7 @@ void setup() {
 	LEDs::getBaselightGreen().setCallback(onGreenBaselightsChanged);
 	LEDs::getBaselightBlue().setCallback(onBlueBaselightsChanged);
 
-    // wifiManager.setDebugOutput(true);
+    wifiManager.setDebugOutput(true);
     wifiManager.setHostname(hostName.value.c_str()); // name router associates DNS entry with
     wifiManager.setCustomOptionsHTML("<br><form action='/t' name='time_form' method='post'><button name='time' onClick=\"{var now=new Date();this.value=now.getFullYear()+','+(now.getMonth()+1)+','+now.getDate()+','+now.getHours()+','+now.getMinutes()+','+now.getSeconds();} return true;\">Set Clock Time</button></form><br><form action=\"/app.html\" method=\"get\"><button>Configure Clock</button></form>");
     wifiManager.addParameter(hostnameParam);
@@ -871,7 +1018,16 @@ void setup() {
 
 	hostName.setCallback(onHostnameChanged);
 
-    ESP_LOGD(TIME_FLIES_TAG, "setup() running on core %d", xPortGetCoreID());
+    xTaskCreatePinnedToCore(
+        sppTaskFn,   /* Function to implement the task */
+        "BT SPP task", /* Name of the task */
+        4096,                 /* Stack size in words */
+        NULL,                 /* Task input parameter */
+        tskIDLE_PRIORITY + 1,     /* More than background tasks */
+        &sppTask,    /* Task handle. */
+        xPortGetCoreID());
+
+    Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }

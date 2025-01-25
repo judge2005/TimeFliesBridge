@@ -189,6 +189,15 @@
 			background-repeat: no-repeat;
 			background-size: 100%;
 		}
+
+		.console-div {
+			overflow-y: auto;
+    		height: 200px;
+		}
+
+		.console-div > div {
+			white-space: nowrap;
+		}
 	</style>
 	<script>
 		var serverSetting = false;
@@ -248,7 +257,23 @@
 						fieldSet.checkboxradio("refresh");
 						radioEl.change();
 					} else {
-						element.html(this[key]);
+						var value = this[key];
+						if (!Array.isArray(value)) {
+							element.html(value);
+						} else {
+							try {
+								var isScrolledToBottom = element[0].scrollHeight - element[0].clientHeight <= element[0].scrollTop + 1;
+
+								element.contents().remove();
+								value.forEach((val) => {
+									element.append($("<div></div>").append(document.createTextNode(val)));
+								});
+
+								if (isScrolledToBottom) {
+									element.animate({ scrollTop: element[0].scrollHeight}, 1000);
+								}
+							} catch (ex) { }
+						}
 					}
 				} else {
 					element.val(this[key]);
