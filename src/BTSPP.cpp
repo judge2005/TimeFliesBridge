@@ -139,6 +139,11 @@ void BTSPP::startConnection(uint8_t *address) {
     }
 }
 
+void BTSPP::endConnection() {
+    ESP_LOGD(BT_SPP_TAG, "Disconnecting");
+    esp_spp_disconnect(peerHandle);
+}
+
 void BTSPP::write(const std::string& msg) {
     if (msg.length() < MAX_STRING_LENGTH) {
         strcpy(writeBuf, msg.c_str());
@@ -194,6 +199,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         ESP_LOGD(BT_SPP_TAG, "ESP_SPP_CLOSE_EVT status:%d handle:%d close_by_remote:%d", param->close.status,
                  param->close.handle, param->close.async);
         connectDone = false;
+        peerHandle = 0;
         break;
     case ESP_SPP_START_EVT:
         ESP_LOGD(BT_SPP_TAG, "ESP_SPP_START_EVT");

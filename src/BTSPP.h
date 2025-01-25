@@ -14,6 +14,7 @@ public:
     bool init();
     bool inited() { return initDone; }
     void startConnection(uint8_t *address);
+    void endConnection();
     bool connectionDone() { return connectDone; }
     void write(const std::string& msg);
 

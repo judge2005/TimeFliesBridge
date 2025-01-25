@@ -89,36 +89,39 @@ public:
 	static void log(LogLevel lvl, const char *format, ...) {
 		va_list args;
 		va_start(args, format);
-		vsnprintf(logBuffer[endLogIndex], LOG_ENTRY_SIZE, format, args);
+		int tailIndex = (startLogIndex + numLogEntries) % MAX_LOG_ENTRIES;
 		
+		if (numLogEntries == MAX_LOG_ENTRIES) {
+			startLogIndex = (startLogIndex + 1) % MAX_LOG_ENTRIES;
+		}
+
+		vsnprintf(logBuffer[tailIndex], LOG_ENTRY_SIZE, format, args);
+
+		numLogEntries = min(++numLogEntries, MAX_LOG_ENTRIES);
+
 		switch (lvl) {
 			case ERROR:
-				ESP_LOGE(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				ESP_LOGE(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
 				break;
 
 			case WARN:
-				ESP_LOGW(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				ESP_LOGW(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
 				break;
 
 			case INFO:
-				ESP_LOGI(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				ESP_LOGI(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
 				break;
 
 			case DEBUG:
-				ESP_LOGD(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				ESP_LOGD(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
 				break;
 
 			case VERBOSE:
-				ESP_LOGV(TIME_FLIES_TAG, "%s", logBuffer[endLogIndex]);
+				ESP_LOGV(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
 				break;
 		}
 
-		endLogIndex = (endLogIndex + 1) % MAX_LOG_ENTRIES;
-		numLogEntries = min(++numLogEntries, MAX_LOG_ENTRIES);
-
-		if (numLogEntries == MAX_LOG_ENTRIES) {
-			startLogIndex = (endLogIndex + 1) % MAX_LOG_ENTRIES;
-		}
+		ESP_LOGD(TIME_FLIES_TAG, "After log: startIndex=%d, tailIndex=%d, numEntries=%d", startLogIndex, tailIndex, numLogEntries);
 
 		broadcastUpdate();
 
@@ -175,7 +178,8 @@ public:
 			JsonDocument doc;
 			doc["type"] = "sv.update";
 			for (int count=0, index=startLogIndex; count < numLogEntries; count++, index = (index+1) % MAX_LOG_ENTRIES) {
-				doc["value"]["console_data"][index] = logBuffer[index];
+		
+				doc["value"]["console_data"][count] = logBuffer[index];
 			}
 
 			::broadcastUpdate(doc);
@@ -184,13 +188,11 @@ public:
 
 private:
 	static int startLogIndex;
-	static int endLogIndex;
 	static int numLogEntries;
 	static char logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE];
 };
 
 int Logger::startLogIndex = 0;
-int Logger::endLogIndex = 0;
 int Logger::numLogEntries = 0;
 char Logger::logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE] = {};
 
@@ -200,6 +202,7 @@ typedef enum {
     SEARCHING,
     CONNECTING,
     CONNECTED,
+	DISCONNECTING
 } SPPConnectionState;
 
 StringConfigItem hostName("hostname", 63, "timefliesbridge");
@@ -575,6 +578,7 @@ void sppTaskFn(void *pArg) {
 	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
 	uint32_t maxWait = 1000;
 	delay(10000);
+	uint32_t lastConnectedTime = millis();
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
         if (!wifiManager.isAP()) {
@@ -582,10 +586,9 @@ void sppTaskFn(void *pArg) {
         }
 
 		if (result) {
-			if (*msg == 0) {
-				xQueueReceive(sppQueue, msg, 0);
-				initSPP();
-			} else if (connectionStatus == CONNECTED) {
+			if (connectionStatus == CONNECTED) {
+				// If we are connected, just drain the queue
+				lastConnectedTime = millis();
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
 
@@ -595,8 +598,33 @@ void sppTaskFn(void *pArg) {
 				} else {
 					Logger::log(INFO, "Sent: %s", msg);
 				}
+				delayNextMsg = cmdDelay;
+				continue;
+			} else if (connectionStatus == NOT_INITIALIZED) {
+				initSPP();	// Haven't even initialzed BT yet
+			} else if (connectionStatus == NOT_CONNECTED) {
+				if (tfAddress != 0ULL) {
+					Logger::log(INFO, "Connecting to clock");
+					connectionStatus = CONNECTING;
+					uint64_t uAddress = tfAddress;
+					esp_bd_addr_t address = {0};
+					address[0] = uAddress & 0xff;
+					address[1] = (uAddress >> 8) & 0xff;
+					address[2] = (uAddress >> 16) & 0xff;
+					address[3] = (uAddress >> 24) & 0xff;
+					address[4] = (uAddress >> 32) & 0xff;
+					address[5] = (uAddress >> 40) & 0xff;
+					
+					btSPP.startConnection(address);
+				} else {
+					connectionStatus = SEARCHING;
+					Logger::log(INFO, "Searching for clock");
+					if (!btGAP.startInquiry()) {
+						Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
+						connectionStatus = NOT_CONNECTED;
+					}
+				}
 			}
-			delayNextMsg = cmdDelay;
 		} else {
 			cmdDelay = 1000;
 			delayNextMsg = 1;
@@ -619,27 +647,18 @@ void sppTaskFn(void *pArg) {
 			}
 		}
 
-        if (connectionStatus == NOT_CONNECTED) {
-            if (tfAddress != 0ULL) {
-				Logger::log(INFO, "Connecting to clock");
-                connectionStatus = CONNECTING;
-                uint64_t uAddress = tfAddress;
-                esp_bd_addr_t address = {0};
-                address[0] = uAddress & 0xff;
-                address[1] = (uAddress >> 8) & 0xff;
-                address[2] = (uAddress >> 16) & 0xff;
-                address[3] = (uAddress >> 24) & 0xff;
-                address[4] = (uAddress >> 32) & 0xff;
-                address[5] = (uAddress >> 40) & 0xff;
-                
-                btSPP.startConnection(address);
-            } else {
-				connectionStatus = SEARCHING;
-				Logger::log(INFO, "Searching for clock");
-				if (!btGAP.startInquiry()) {
-					Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
-					connectionStatus = NOT_CONNECTED;
-				}
+		if (connectionStatus == CONNECTED) {
+			if (millis() - lastConnectedTime > 30000) {
+				Logger::log(INFO, "Disconnecting");
+				btSPP.endConnection();
+				connectionStatus = DISCONNECTING;
+			}
+		}
+
+		if (connectionStatus == DISCONNECTING) {
+			if (!btSPP.connectionDone()) {
+				Logger::log(INFO, "Disconnected");
+				connectionStatus = NOT_CONNECTED;
 			}
 		}
 
@@ -665,15 +684,6 @@ void sppTaskFn(void *pArg) {
 			if (btSPP.connectionDone()) {
 				Logger::log(INFO, "Connected");
 				connectionStatus = CONNECTED;
-			}
-		}
-
-		if (connectionStatus == CONNECTED) {
-			heap_caps_check_integrity_all(true);
-			if (btSPP.connectionDone() == false) {
-				// We disconnected! Start again.
-				Logger::log(INFO, "Disconnected, reconnecting");
-				connectionStatus = NOT_CONNECTED;
 			}
 		}
 	}
@@ -885,9 +895,6 @@ void connectedHandler() {
 
 void apChange(AsyncWiFiManager *wifiManager) {
 	ESP_LOGD(TIME_FLIES_TAG, "apChange(), isAP: %d", wifiManager->isAP());
-	if (!wifiManager->isAP()) {
-		xQueueSend(sppQueue, "", 0);
-	}
 }
 
 void setWiFiAP(bool on) {
