@@ -153,12 +153,12 @@ var consoleData = [];
 var valCount = 0;
 
 var updateConsole = function(conn) {
-	if (consoleData.length === 20) {
-		consoleData.shift(); // Remove the first (oldest) element
-	}
-	consoleData.push("This is a very long value that will hopefull overflow the right hand side value <high> " + ++valCount);
+	// if (consoleData.length === 20) {
+	// 	consoleData.shift(); // Remove the first (oldest) element
+	// }
+	// consoleData.push("This is a very long value that will hopefull overflow the right hand side value <high> " + ++valCount);
 
-	broadcastUpdate(conn, "console_data", consoleData);
+	// broadcastUpdate(conn, "console_data", consoleData);
 }
 
 wss.on('connection', function(conn) {

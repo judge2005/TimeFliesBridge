@@ -67,16 +67,16 @@
 			width: 52px !important;
 		}
 
-		.hue + .ui-slider-track {
-			background-image: linear-gradient(to right, red,yellow,lime,cyan,blue,magenta, red);
+		.red + .ui-slider-track {
+			background-image: linear-gradient(to right, black, red);	
 		}
 
-		.saturation + .ui-slider-track {
-			background-image: linear-gradient(to right, white, hwb(120 0% 0%));
+		.green + .ui-slider-track {
+			background-image: linear-gradient(to right, black, green);
 		}
 
-		.value + .ui-slider-track {
-			background-image: linear-gradient(to right, black, hwb(120 0% 0%));
+		.blue + .ui-slider-track {
+			background-image: ilinear-gradient(to right, black, blue);
 		}
 
 		.ui-fieldset {
@@ -373,85 +373,42 @@
 
 		function colorChange(element) {
 			element=$(element);
-			var val = getElementValue(element);
+			var val = Math.round(getElementValue(element) * 255 / 7);
 			var elementId = element.attr('id');
 			var fieldset = $("fieldset:has(#" + elementId +")");
-			var cp = fieldset.find(".color_picker");
 			var fieldsetId = fieldset.attr("id");
-			if (element.hasClass('hue')) {
-				var track = fieldset.find(".saturation + .ui-slider-track");
-				var css = "linear-gradient(to right, white, hwb(" + Math.round(val * 360 / 255) + " 0% 0%))";
-				track.css({"background-image": css});
-				track = fieldset.find(".value + .ui-slider-track");
-				css = "linear-gradient(to right, black, hwb(" + Math.round(val * 360 / 255) + " 0% 0%))";
-				track.css({"background-image": css});
-
-				track = fieldset.find(".hue + .ui-slider-track");
-				var handle = track.find(".ui-slider-handle");
-				//css = "rgba(255, 255, 255, 0.5)";
-				css = "hwb(" + Math.round(val * 360 / 255) + " 0% 0%)";
-				handle.css({"background-color": css});
-
-				track = fieldset.find(".saturation + .ui-slider-track");
-				handle = track.find(".ui-slider-handle");
-				css = "hwb(" + Math.round(val * 360 / 255) + " " + Math.round((255-clockColors[fieldsetId].s) * 100 /255) + "% 0%)";
-				handle.css({"background-color": css});
-
-				track = fieldset.find(".value + .ui-slider-track");
-				handle = track.find(".ui-slider-handle");
-				css = "hwb(" + Math.round(val * 360 / 255) + " 0% " + Math.round((255-clockColors[fieldsetId].v) * 100 /255) + "%)";
-				handle.css({"background-color": css});
-
-				if (typeof cp != 'undefined') {
-					try {
-						var spectrumLedColor = pickerColors[fieldsetId];
-						clockColors[fieldsetId].h = val;
-						spectrumLedColor.h = val*360/255;
-						cp.spectrum("set", tinycolor(spectrumLedColor));
-					} catch(ex) {
-						// console.log("Bad call to color picker");
-						// console.log(ex);
-					}
-				}
+			if (element.hasClass('red')) {
+				clockColors[fieldsetId]['red'] = val;
 			}
 
-			if (element.hasClass('saturation')) {
-				if (typeof cp != 'undefined') {
-					try {
-						var spectrumLedColor = pickerColors[fieldsetId];
-						clockColors[fieldsetId].s = val;
-						spectrumLedColor.s = val/255;
-						cp.spectrum("set", tinycolor(spectrumLedColor));
-
-						var track = fieldset.find(".saturation + .ui-slider-track");
-						var handle = track.find(".ui-slider-handle");
-						css = "hwb(" + Math.round(clockColors[fieldsetId].h * 360 / 255) + " " + Math.round((255-val) * 100 /255) + "% 0%)";
-						handle.css({"background-color": css});
-					} catch(ex) {
-						// console.log("Bad call to color picker");
-						// console.log(ex);
-					}
-				}
+			if (element.hasClass('green')) {
+				clockColors[fieldsetId]['green'] = val;
 			}
 
-			if (element.hasClass('value')) {
-				if (typeof cp != 'undefined') {
-					try {
-						var spectrumLedColor = pickerColors[fieldsetId];
-						clockColors[fieldsetId].v = val;
-						spectrumLedColor.v = val/255;
-						cp.spectrum("set", tinycolor(spectrumLedColor));
-
-						var track = fieldset.find(".value + .ui-slider-track");
-						var handle = track.find(".ui-slider-handle");
-						css = "hwb(" + Math.round(clockColors[fieldsetId].h * 360 / 255) + " 0% " + Math.round((255-val) * 100 /255) + "%)";
-						handle.css({"background-color": css});
-					} catch(ex) {
-						// console.log("Bad call to color picker");
-						// console.log(ex);
-					}
-				}
+			if (element.hasClass('blue')) {
+				clockColors[fieldsetId]['blue'] = val;
 			}
+
+			var rgb = "rgb(" + clockColors[fieldsetId]['red'] + ", " + clockColors[fieldsetId]['green'] + ", " + clockColors[fieldsetId]['blue'] + ")";
+			var css = "linear-gradient(to right, " + rgb + ", " + rgb + ")";
+
+			fieldset.find(".ui-slider-track").each(function (i, track) {
+				$(track).css({"background-image": css});
+			});
+
+			/*
+			var handle = fieldset.find(".red + .ui-slider-track").find(".ui-slider-handle");
+			css = "rgb(" + clockColors[fieldsetId]['red'] + ", 0, 0)";
+			handle.css({"background-color": css});
+
+			handle = fieldset.find(".green + .ui-slider-track").find(".ui-slider-handle");
+			css = "rgb(0, " + clockColors[fieldsetId]['green'] + ", 0)";
+			handle.css({"background-color": css});
+
+			handle = fieldset.find(".blue + .ui-slider-track").find(".ui-slider-handle");
+			css = "rgb(0, 0, " + clockColors[fieldsetId]['blue'] + ")";
+			handle.css({"background-color": css});
+			*/
 		}
 
 		function initializeMenu(values) {
@@ -625,6 +582,10 @@
 					console.log("Blur value:", $(this).val());
 					elementChange(this);
 				});
+				slider.on("change", function(event, ui) {
+					console.log("Change value:", $(this).val());
+					colorChange(this);
+				});
 			});
 
 			$('[data-role="collapsible"]') .collapsible({
@@ -639,55 +600,8 @@
 			$('.color_picker').each(function(i, cp) {
 				cp = $(cp);
 				var elementId = cp.attr("id");
-				var fieldset = $("fieldset:has(#" + elementId +")");
 
-				clockColors[fieldset.attr("id")] = {"h":0,"s":255,"v":255};
-				pickerColors[fieldset.attr("id")] = {"h":0,"s":1,"v":1};
-
-				cp.spectrum({
-					color: 180,
-					chooseText: "Close",
-					cancelText: "",
-					move: function(tinycolor) {
-						if (serverSetting) {
-							return;
-						}
-						var hsv = tinycolor.toHsv();
-
-						var elementId = $(this).attr("id");
-						var fieldset = $("fieldset:has(#" + elementId +")");
-						var clockColor = clockColors[fieldset.attr("id")];
-						var pickerColor = pickerColors[fieldset.attr("id")];
-
-						pickerColor.h = hsv.h;
-						pickerColor.s = hsv.s;
-						pickerColor.v = hsv.v;
-
-						var h = Math.round(pickerColor.h*255/360);
-						var s = Math.round(pickerColor.s*255);
-						var v = Math.round(pickerColor.v*255);
-
-						var pageId = getPageId($(".ui-page-active").attr("id"));
-
-						if (h != clockColor.h) {
-							clockColor.h = h;
-							var sliderId = fieldset.find(".hue").attr("id");
-							safeSend('9:' + pageId + ':' + sliderId + ':' + h);
-						}
-
-						if (s != clockColor.s) {
-							clockColor.s = s;
-							var sliderId = fieldset.find(".saturation").attr("id");
-							safeSend('9:' + pageId + ':' + sliderId + ':' + s);
-						}
-
-						if (v != clockColor.v) {
-							clockColor.v = v;
-							var sliderId = fieldset.find(".value").attr("id");
-							safeSend('9:' + pageId + ':' + sliderId + ':' + v);
-						}
-					},
-				});
+				clockColors[elementId] = {"red":255,"green":255,"blue":255};
 			});
 
 			$.fn.roundSlider.prototype._invertRange = true;
