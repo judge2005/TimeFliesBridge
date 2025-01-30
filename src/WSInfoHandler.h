@@ -30,6 +30,10 @@ public:
 		this->brightness = brightness;
 	}
 
+	void setUptime(const char *uptime) {
+		this->uptime = uptime;
+	}
+
 	void setClockOn(const String& clockOn) {
 		this->clockOn = clockOn;
 	}
@@ -77,6 +81,7 @@ private:
 	String failedCount;
 	String hostname;
 	String revision;
+	String uptime;
 };
 
 

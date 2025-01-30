@@ -198,6 +198,21 @@
 		.console-div > div {
 			white-space: nowrap;
 		}
+
+		#console .ui-collapsible-content {
+			display: block !important;
+			max-height: 200px;	/* A bit more than the console-div height */
+			opacity: 1;
+			transition: max-height 0.2s ease-in-out, opacity 0.2s ease-in-out;
+		}
+
+		#console .ui-collapsible-content-collapsed {
+			display: block !important;
+			opacity: 0;
+			visibility: none;
+			overflow: hidden;
+			max-height: 0;
+		}
 	</style>
 	<script>
 		var serverSetting = false;
@@ -588,7 +603,7 @@
 				});
 			});
 
-			$('[data-role="collapsible"]') .collapsible({
+			$('[data-role="collapsible"]').collapsible({
 				collapse: function(event, ui) {
 					elementBlur(event.target);
 				},

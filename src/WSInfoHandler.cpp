@@ -58,7 +58,7 @@ void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	doc["value"]["triggered"] = triggered;
 	doc["value"]["clock_on"] = clockOn;
 
-	// value["up_time"] = uptime.uptime();
+	doc["value"]["up_time"] = uptime;
 	doc["value"]["sync_time"] = lastUpdateTime;
 	doc["value"]["sync_failed_msg"] = lastFailedMessage;
 	doc["value"]["sync_failed_cnt"] = failedCount;

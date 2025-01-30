@@ -18,40 +18,11 @@ bool BTSPP::init() {
     if (self == 0) {
         ESP_LOGD(BT_SPP_TAG, "Initializing SPP");
         self = this;
-        err = 0;
         err = ESP_OK;
         initDone = false;
 
-        btStart();
-
-        esp_bt_mode_t esp_bt_mode;
-        esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-        cfg.mode = ESP_BT_MODE_CLASSIC_BT;
-        esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
-
-        if (esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED) {
-            if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
-                if ((err = esp_bt_controller_init(&cfg)) != ESP_OK) {
-                    log_e("initialize controller failed: %s", esp_err_to_name(err));
-                    errMsg = "initialize controller failed: ";
-                    errMsg += esp_err_to_name(err);
-                    return false;
-                }
-                while (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {}
-            }
-            if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED) {
-                if ((err = esp_bt_controller_enable(esp_bt_mode)) != ESP_OK) {
-                    log_e("BT Enable failed %s", esp_err_to_name(err));
-                    errMsg = "BT Enable failed: ";
-                    errMsg += esp_err_to_name(err);
-                    return false;
-                }
-            }
-            if (esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED) {
-                errMsg = "Controller not enabled: ";
-                errMsg += esp_bt_controller_get_status();
-                return false;
-            }
+        if (!btStartMode(BT_MODE_CLASSIC_BT)) {
+            return false;
         }
 
         if ((err = esp_bluedroid_init()) != ESP_OK) {
@@ -68,7 +39,7 @@ bool BTSPP::init() {
 
         ESP_LOGD(BT_SPP_TAG, "Enabled bluedroid");
 
-        if ((err = esp_bt_dev_set_device_name(name.c_str())) != ESP_OK) {
+        if ((err = esp_bt_gap_set_device_name(name.c_str())) != ESP_OK) {
             errMsg = "Failed to set device name: ";
             errMsg += esp_err_to_name(err);
             return false;
@@ -183,6 +154,8 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
             /* We only connect to the first found server on the remote SPP acceptor here */
             esp_spp_connect(sec_mask, role_master, param->disc_comp.scn[0], address);
         } else {
+            err = param->disc_comp.status;
+            errMsg = "Service discovery failed";
             ESP_LOGE(BT_SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT status=%d", param->disc_comp.status);
         }
         break;
@@ -260,6 +233,8 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
         break;
     case ESP_SPP_UNINIT_EVT:
         ESP_LOGD(BT_SPP_TAG, "ESP_SPP_UNINIT_EVT");
+        self = 0;
+        initDone = false;
         break;
     default:
         break;
@@ -267,5 +242,7 @@ void BTSPP::btSPPCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 }
 
 void BTSPP::btSPPCallbackC(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
-    self->btSPPCallback(event, param);
+    if (self != 0) {
+        self->btSPPCallback(event, param);
+    }
 }

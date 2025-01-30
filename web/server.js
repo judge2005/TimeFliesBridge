@@ -117,7 +117,8 @@ var state = {
 		'esp_chip_id' : "chip id",
 		'wifi_ip_address' : "192.168.1.1",
 		'wifi_mac_address' : "0E:12:34:56:78",
-		'wifi_ssid' : "STC-Wonderful"
+		'wifi_ssid' : "STC-Wonderful",
+		'up_time' : "2567 days 12:00:01"
 	}
 }
 
@@ -153,12 +154,12 @@ var consoleData = [];
 var valCount = 0;
 
 var updateConsole = function(conn) {
-	// if (consoleData.length === 20) {
-	// 	consoleData.shift(); // Remove the first (oldest) element
-	// }
-	// consoleData.push("This is a very long value that will hopefull overflow the right hand side value <high> " + ++valCount);
+	if (consoleData.length === 20) {
+		consoleData.shift(); // Remove the first (oldest) element
+	}
+	consoleData.push("This is a very long value that will hopefull overflow the right hand side value <high> " + ++valCount);
 
-	// broadcastUpdate(conn, "console_data", consoleData);
+	broadcastUpdate(conn, "console_data", consoleData);
 }
 
 wss.on('connection', function(conn) {

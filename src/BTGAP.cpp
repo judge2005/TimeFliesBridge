@@ -123,6 +123,14 @@ void BTGAP::btGapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
         ESP_LOGD(BT_GAP_TAG, "ESP_BT_GAP_MODE_CHG_EVT mode:%d", param->mode_chg.mode);
         break;
 
+    case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
+        ESP_LOGD(BT_GAP_TAG, "ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT");
+        break;
+
+    case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT:
+        ESP_LOGD(BT_GAP_TAG, "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT");
+        break;
+
     default:
         ESP_LOGD(BT_GAP_TAG, "Unknown event: %d", event);
         break;

@@ -73,8 +73,54 @@ void ConfigItem<T>::debug(Print *debugPrint) const {
 }
 template void ConfigItem<uint64_t>::debug(Print *debugPrint) const;
 
+class Uptime {
+public:
+	Uptime() {
+		utMutex = xSemaphoreCreateMutex();
+	}
+	char *uptime();
+	void loop();
+
+private:
+	SemaphoreHandle_t utMutex;
+	unsigned long long rollover = 0;
+	unsigned long lastMillis;
+	char _return[32];
+};
+
+void Uptime::loop() {
+	xSemaphoreTake(utMutex, portMAX_DELAY);
+
+	unsigned long now = millis();
+	if (lastMillis > now) {
+		rollover++;
+	}
+	lastMillis = now;
+
+	xSemaphoreGive(utMutex);
+}
+
+char *Uptime::uptime() {
+	xSemaphoreTake(utMutex, portMAX_DELAY);
+
+	unsigned long long _now = (rollover << 32) + lastMillis;
+	unsigned long secs = _now / 1000LL, mins = secs / 60;
+	unsigned long hours = mins / 60, days = hours / 24;
+	secs -= mins * 60;
+	mins -= hours * 60;
+	hours -= days * 24;
+	sprintf(_return, "%d days %02dh %02dm %02ds", (int) days,
+			(int) hours, (int) mins, (int) secs);
+
+	xSemaphoreGive(utMutex);
+
+	return _return;
+}
+
+Uptime uptime;
+
 #define LOG_ENTRY_SIZE 100
-#define MAX_LOG_ENTRIES 20
+#define MAX_LOG_ENTRIES 40
 
 typedef enum {
 	ERROR = 1,
@@ -554,36 +600,56 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
 void initSPP() {
-    static bool inited = false;
-
-    if (!inited) {
-        inited = true;
-        WiFi.setSleep(true);
-        if (btSPP.init()) {
-            if (btGAP.init()) {
+	WiFi.setSleep(true);
+	if (!btSPP.inited()) {
+		if (btSPP.init()) {
+			if (btGAP.init()) {
 				connectionStatus = NOT_CONNECTED;
-            } else {
-                Logger::log(ERROR, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
-            }
-        } else {
-            Logger::log(ERROR, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
-        }
-    }
+			} else {
+				Logger::log(ERROR, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
+			}
+		} else {
+			Logger::log(ERROR, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
+		}
+	}
 }
 
+void initiateConnection() {
+	if (tfAddress != 0ULL) {
+		Logger::log(INFO, "Connecting to clock");
+		connectionStatus = CONNECTING;
+		uint64_t uAddress = tfAddress;
+		esp_bd_addr_t address = {0};
+		address[0] = uAddress & 0xff;
+		address[1] = (uAddress >> 8) & 0xff;
+		address[2] = (uAddress >> 16) & 0xff;
+		address[3] = (uAddress >> 24) & 0xff;
+		address[4] = (uAddress >> 32) & 0xff;
+		address[5] = (uAddress >> 40) & 0xff;
+		
+		btSPP.startConnection(address);
+	} else {
+		connectionStatus = SEARCHING;
+		Logger::log(INFO, "Searching for clock");
+		if (!btGAP.startInquiry()) {
+			Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
+			connectionStatus = NOT_CONNECTED;
+		}
+	}
+}
 void sppTaskFn(void *pArg) {
     static char msg[MAX_MSG_SIZE];
 
+	timeSync->init();
+
 	uint32_t delayNextMsg = 1;
 	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
-	uint32_t maxWait = 1000;
+	uint32_t maxWait = 500;
 	delay(10000);
 	uint32_t lastConnectedTime = millis();
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
-        if (!wifiManager.isAP()) {
-            initSPP();
-        }
+		uptime.loop();
 
 		if (result) {
 			if (connectionStatus == CONNECTED) {
@@ -601,29 +667,9 @@ void sppTaskFn(void *pArg) {
 				delayNextMsg = cmdDelay;
 				continue;
 			} else if (connectionStatus == NOT_INITIALIZED) {
-				initSPP();	// Haven't even initialzed BT yet
+				initSPP();	// Haven't initialzed BT yet
 			} else if (connectionStatus == NOT_CONNECTED) {
-				if (tfAddress != 0ULL) {
-					Logger::log(INFO, "Connecting to clock");
-					connectionStatus = CONNECTING;
-					uint64_t uAddress = tfAddress;
-					esp_bd_addr_t address = {0};
-					address[0] = uAddress & 0xff;
-					address[1] = (uAddress >> 8) & 0xff;
-					address[2] = (uAddress >> 16) & 0xff;
-					address[3] = (uAddress >> 24) & 0xff;
-					address[4] = (uAddress >> 32) & 0xff;
-					address[5] = (uAddress >> 40) & 0xff;
-					
-					btSPP.startConnection(address);
-				} else {
-					connectionStatus = SEARCHING;
-					Logger::log(INFO, "Searching for clock");
-					if (!btGAP.startInquiry()) {
-						Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
-						connectionStatus = NOT_CONNECTED;
-					}
-				}
+				initiateConnection();
 			}
 		} else {
 			cmdDelay = 1000;
@@ -655,9 +701,17 @@ void sppTaskFn(void *pArg) {
 			}
 		}
 
+		if (connectionStatus == NOT_CONNECTED) {
+			// if (!btSPP.inited()) {
+			// 	connectionStatus = NOT_INITIALIZED;
+			// 	WiFi.setSleep(false);
+			// }
+		}
+
 		if (connectionStatus == DISCONNECTING) {
 			if (!btSPP.connectionDone()) {
 				Logger::log(INFO, "Disconnected");
+				// btSPP.deInit();
 				connectionStatus = NOT_CONNECTED;
 			}
 		}
@@ -681,6 +735,12 @@ void sppTaskFn(void *pArg) {
         }
 
 		if (connectionStatus == CONNECTING) {
+			// Connecting might fail - re-initiate the connection attempt
+			if (btSPP.isError()) {
+				Logger::log(INFO, btSPP.getErrMessage().c_str());
+				initiateConnection();
+			}
+
 			if (btSPP.connectionDone()) {
 				Logger::log(INFO, "Connected");
 				connectionStatus = CONNECTED;
@@ -688,7 +748,6 @@ void sppTaskFn(void *pArg) {
 		}
 	}
 }
-
 
 String* items[] {
 	&WSMenuHandler::clockMenu,
@@ -730,6 +789,8 @@ void infoCallback() {
 	wsInfoHandler.setLastFailedMessage(syncStats.lastFailedMessage);
 	wsInfoHandler.setLastUpdateTime(syncStats.lastUpdateTime);
 	wsInfoHandler.setHostname(hostName);
+
+	wsInfoHandler.setUptime(uptime.uptime());
 }
 
 void broadcastUpdate(const JsonDocument &doc) {
@@ -969,7 +1030,6 @@ void setup() {
 	LittleFS.begin();
 
 	timeSync = new EspSNTPTimeSync(TimeFliesClock::getTimeZone(), asyncTimeSetCallback, NULL);
-	timeSync->init();
 
     xTaskCreatePinnedToCore(
         commitEEPROMTaskFn,   /* Function to implement the task */
@@ -1001,6 +1061,7 @@ void setup() {
 	LEDs::getBaselightGreen().setCallback(onGreenBaselightsChanged);
 	LEDs::getBaselightBlue().setCallback(onBlueBaselightsChanged);
 
+	WiFi.setSleep(false);
     wifiManager.setDebugOutput(true);
     wifiManager.setHostname(hostName.value.c_str()); // name router associates DNS entry with
     wifiManager.setCustomOptionsHTML("<br><form action='/t' name='time_form' method='post'><button name='time' onClick=\"{var now=new Date();this.value=now.getFullYear()+','+(now.getMonth()+1)+','+now.getDate()+','+now.getHours()+','+now.getMinutes()+','+now.getSeconds();} return true;\">Set Clock Time</button></form><br><form action=\"/app.html\" method=\"get\"><button>Configure Clock</button></form>");
@@ -1028,7 +1089,7 @@ void setup() {
     xTaskCreatePinnedToCore(
         sppTaskFn,   /* Function to implement the task */
         "BT SPP task", /* Name of the task */
-        4096,                 /* Stack size in words */
+        8192,                 /* Stack size in words */
         NULL,                 /* Task input parameter */
         tskIDLE_PRIORITY + 1,     /* More than background tasks */
         &sppTask,    /* Task handle. */
