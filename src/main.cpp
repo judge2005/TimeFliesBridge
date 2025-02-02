@@ -7,8 +7,6 @@
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 #include "esp_mac.h"
 #endif
-#include "BTSPP.h"
-#include "BTGAP.h"
 #include <esp_wifi.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -242,14 +240,18 @@ int Logger::startLogIndex = 0;
 int Logger::numLogEntries = 0;
 char Logger::logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE] = {};
 
-typedef enum {
-	NOT_INITIALIZED = 0,
-    NOT_CONNECTED,
-    SEARCHING,
-    CONNECTING,
-    CONNECTED,
-	DISCONNECTING
-} SPPConnectionState;
+enum HC05_STATE_ENUM {
+	INITIALIZED = 0,
+	READY,
+	PAIRABLE,
+	PAIRED,
+	INQUIRING,
+	CONNECTING,
+	CONNECTED,
+	DISCONNECTED,
+	NUKNOW
+};
+
 
 StringConfigItem hostName("hostname", 63, "timefliesbridge");
 LongConfigItem tfAddress("address", 0);
@@ -260,8 +262,6 @@ DNSServer dns;
 AsyncWiFiManager wifiManager(&server, &dns);
 ASyncOTAWebUpdate otaUpdater(Update, "update", "secretsauce");
 AsyncWiFiManagerParameter *hostnameParam;
-BTSPP btSPP(hostName.toString().c_str());
-BTGAP btGAP;
 EspSNTPTimeSync *timeSync;
 TimeFliesClock timeFliesClock;
 
@@ -597,50 +597,138 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 	setLights(item, baselightsBlueTemplates);
 }
 
-SPPConnectionState connectionStatus = NOT_INITIALIZED;
+HC05_STATE_ENUM connectionStatus = NUKNOW;
+
+#define RXD 16
+#define TXD 17
+String OK("OK\r\n");
+
+bool verifyHC05Command(String command) {
+	Serial1.println(command);
+	String result = Serial1.readStringUntil('\n');
+	bool ret = result.equals(OK);
+	if (!ret) {
+		ESP_LOGE(TIME_FLIES_TAG, "Unexpected result: %s", result.c_str());
+	}
+}
 
 void initSPP() {
-	WiFi.setSleep(true);
-	if (!btSPP.inited()) {
-		if (btSPP.init()) {
-			if (btGAP.init()) {
-				connectionStatus = NOT_CONNECTED;
-			} else {
-				Logger::log(ERROR, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
-			}
-		} else {
-			Logger::log(ERROR, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
-		}
+/*
+AT+RMAAD (To clear any paired devices)
+AT+ROLE=1 (To set it as master)
+AT+CMODE=0 (To connect the module to the specified Bluetooth address and this Bluetooth address can be specified by the binding command)
+AT+BIND=xxxx,xx,xxxxxx (Now, type AT+BIND=98d3,34,906554 obviously with your respective address to the slave. Note the commas instead of colons given by the slave module.
+AT+UART=38400,0,0 (To fix the baud rate at 38400)
+*/
+	Serial1.begin(38400, SERIAL_8N1, RXD, TXD);
+	if (verifyHC05Command(String("AT+NAME=") + hostName) && verifyHC05Command("AT+RMAAD") && verifyHC05Command("AT+ROLE=1")) {
+		connectionStatus = INITIALIZED;
 	}
 }
 
 void initiateConnection() {
 	if (tfAddress != 0ULL) {
 		Logger::log(INFO, "Connecting to clock");
-		connectionStatus = CONNECTING;
+		/*
+		AT+CMODE=0 (To connect the module to the specified Bluetooth address and this Bluetooth address can be specified by the binding command)
+		AT+BIND=xxxx,xx,xxxxxx (Now, type AT+BIND=98d3,34,906554 obviously with your 
+		*/
 		uint64_t uAddress = tfAddress;
-		esp_bd_addr_t address = {0};
-		address[0] = uAddress & 0xff;
-		address[1] = (uAddress >> 8) & 0xff;
-		address[2] = (uAddress >> 16) & 0xff;
-		address[3] = (uAddress >> 24) & 0xff;
-		address[4] = (uAddress >> 32) & 0xff;
-		address[5] = (uAddress >> 40) & 0xff;
-		
-		btSPP.startConnection(address);
+
+		char buf[30];
+		sprintf(buf, "AT+BIND=%02x%02x,%02x,%02x%02x%02x",
+            uAddress & 0xff,
+			(uAddress >> 8) & 0xff,
+			(uAddress >> 16) & 0xff,
+			(uAddress >> 24) & 0xff,
+			(uAddress >> 32) & 0xff,
+			(uAddress >> 40) & 0xff);
+
+		if (verifyHC05Command("AT+CMODE=0") && verifyHC05Command(buf)) {
+			connectionStatus = CONNECTING;
+		}
 	} else {
-		connectionStatus = SEARCHING;
 		Logger::log(INFO, "Searching for clock");
-		if (!btGAP.startInquiry()) {
-			Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
-			connectionStatus = NOT_CONNECTED;
+		// Max of 10 devices and wait at most 10 * 1.28s
+		if (verifyHC05Command("AT+INQM = 1, 10, 10")) {
+			connectionStatus = INQUIRING;
 		}
 	}
 }
+
+void closeConnection() {
+	/*
+		If Successful Disconnection:
+		+DISC:SUCCESS
+		OK
+		If Lose the connection:
+		+DISC:LINK_LOSS
+		OK
+		If No SLC connection:
+		+DISC:NO_SLC
+		OK
+		If Disconnection Timeout:
+		+DISC:TIMEOUT
+		OK
+		If Disconnection Error:
+		+DISC:ERROR
+		OK
+	*/
+	Serial1.println("AT+DISC");
+	Serial1.readStringUntil('\n');	// Response - we don't care
+	Serial1.readStringUntil('\n');	// OK
+}
+
+void getNamesFromHC05() {
+	/*
+	Send: AT+RNAME?0002,72,od2224
+	Read: +RNAME:Bluetooth
+	Read: OK
+	*/
+}
+
+const char *HC05_STATES[] = {
+	"INITIALIZED",
+	"READY",
+	"PAIRABLE",
+	"PAIRED",
+	"INQUIRING",
+	"CONNECTING",
+	"CONNECTED",
+	"DISCONNECTED",
+	"NUKNOW",
+	0
+};
+
+void updateHC05State() {
+	Serial1.println("AT+STATE?");
+	String result = Serial1.readStringUntil('\n');
+
+	if (strcmp(HC05_STATES[CONNECTED], result.c_str()) == 0) {
+		connectionStatus = CONNECTED;
+	}
+
+	if (strcmp(HC05_STATES[CONNECTING], result.c_str()) == 0) {
+		connectionStatus = CONNECTING;
+	}
+
+	if (strcmp(HC05_STATES[DISCONNECTED], result.c_str()) == 0) {
+		connectionStatus = DISCONNECTED;
+	}
+
+	if (strcmp(HC05_STATES[INITIALIZED], result.c_str()) == 0) {
+		connectionStatus = INITIALIZED;
+	}
+
+	if (strcmp(HC05_STATES[INQUIRING], result.c_str()) == 0) {
+		connectionStatus = INQUIRING;
+	}
+}
+
 void sppTaskFn(void *pArg) {
     static char msg[MAX_MSG_SIZE];
 
-	timeSync->init();
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "sppTaskFn()");
 
 	uint32_t delayNextMsg = 1;
 	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
@@ -658,17 +746,19 @@ void sppTaskFn(void *pArg) {
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
 
+#ifdef notdef
 				btSPP.write(msg);
 				if (btSPP.isError()) {
 					Logger::log(ERROR, "Error writing message: %s", btSPP.getErrMessage());
 				} else {
 					Logger::log(INFO, "Sent: %s", msg);
 				}
+#endif
 				delayNextMsg = cmdDelay;
 				continue;
-			} else if (connectionStatus == NOT_INITIALIZED) {
+			} else if (connectionStatus == NUKNOW) {
 				initSPP();	// Haven't initialzed BT yet
-			} else if (connectionStatus == NOT_CONNECTED) {
+			} else if (connectionStatus == INITIALIZED || connectionStatus == DISCONNECTED) {
 				initiateConnection();
 			}
 		} else {
@@ -696,27 +786,16 @@ void sppTaskFn(void *pArg) {
 		if (connectionStatus == CONNECTED) {
 			if (millis() - lastConnectedTime > 30000) {
 				Logger::log(INFO, "Disconnecting");
-				btSPP.endConnection();
-				connectionStatus = DISCONNECTING;
+				closeConnection();
 			}
 		}
 
-		if (connectionStatus == NOT_CONNECTED) {
-			// if (!btSPP.inited()) {
-			// 	connectionStatus = NOT_INITIALIZED;
-			// 	WiFi.setSleep(false);
-			// }
+		if (connectionStatus == NUKNOW) {
+			initSPP();
 		}
 
-		if (connectionStatus == DISCONNECTING) {
-			if (!btSPP.connectionDone()) {
-				Logger::log(INFO, "Disconnected");
-				// btSPP.deInit();
-				connectionStatus = NOT_CONNECTED;
-			}
-		}
-
-		if (connectionStatus == SEARCHING) {
+		if (connectionStatus == INQUIRING) {
+#ifdef notdef
 			if (btGAP.inquiryDone()) {
                 uint8_t *address = btGAP.getAddress("Time Flies");
                 if (address) {
@@ -732,20 +811,14 @@ void sppTaskFn(void *pArg) {
 				}
                 connectionStatus = NOT_CONNECTED;
             }
+ #endif
         }
 
 		if (connectionStatus == CONNECTING) {
-			// Connecting might fail - re-initiate the connection attempt
-			if (btSPP.isError()) {
-				Logger::log(INFO, btSPP.getErrMessage().c_str());
-				initiateConnection();
-			}
-
-			if (btSPP.connectionDone()) {
-				Logger::log(INFO, "Connected");
-				connectionStatus = CONNECTED;
-			}
+			// Don't need to do anythin here
 		}
+
+		updateHC05State();
 	}
 }
 
@@ -979,6 +1052,8 @@ void setupServer() {
 }
 
 void wifiManagerTaskFn(void *pArg) {
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "wifiManagerTaskFn()");
+
 	while(true) {
 		xSemaphoreTake(wsMutex, portMAX_DELAY);
 		wifiManager.loop();
@@ -989,6 +1064,7 @@ void wifiManagerTaskFn(void *pArg) {
 }
 
 void commitEEPROMTaskFn(void *pArg) {
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "commitEEPROMTaskFn()");
 	while(true) {
 		delay(60000);
 		ESP_LOGD(TIME_FLIES_TAG, "Committing config");
@@ -1011,14 +1087,6 @@ void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
 
-    /* Initialize NVS — it is used to store PHY calibration data */
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-
 	wsMutex = xSemaphoreCreateMutex();
     sppQueue = xQueueCreate(SPP_QUEUE_SIZE, MAX_MSG_SIZE);
  
@@ -1030,6 +1098,7 @@ void setup() {
 	LittleFS.begin();
 
 	timeSync = new EspSNTPTimeSync(TimeFliesClock::getTimeZone(), asyncTimeSetCallback, NULL);
+	timeSync->init();
 
     xTaskCreatePinnedToCore(
         commitEEPROMTaskFn,   /* Function to implement the task */
@@ -1097,7 +1166,7 @@ void setup() {
 
     Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
 
-    vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
+    // vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }
 
 void loop() {
