@@ -650,7 +650,7 @@ void initiateConnection() {
 	} else {
 		Logger::log(INFO, "Searching for clock");
 		// Max of 10 devices and wait at most 10 * 1.28s
-		if (verifyHC05Command("AT+INQM = 1, 10, 10")) {
+		if (verifyHC05Command("AT+INQM=1,10,10")) {
 			connectionStatus = INQUIRING;
 		}
 	}
