@@ -14,6 +14,14 @@ BTSPP::BTSPP(const std::string& name) {
     this->name = name;
 }
 
+bool myBtStart(){
+    if (btStart()) {
+        esp_bt_controller_disable();
+    }
+    log_e("BT Start failed");
+    return false;
+}
+
 bool BTSPP::init() {
     if (self == 0) {
         ESP_LOGD(BT_SPP_TAG, "Initializing SPP");
@@ -21,10 +29,17 @@ bool BTSPP::init() {
         err = ESP_OK;
         initDone = false;
 
+#if ESP_IDF_VERSION_MAJOR >= 5
         if (!btStartMode(BT_MODE_CLASSIC_BT)) {
+            err = ESP_ERR_INVALID_RESPONSE;
             return false;
         }
-
+#else
+        if (!btStart()) {
+            err = ESP_ERR_INVALID_RESPONSE;
+            return false;
+        }
+#endif
         if ((err = esp_bluedroid_init()) != ESP_OK) {
             errMsg = "Bluedroid initialization failed: ";
             errMsg += esp_err_to_name(err);
@@ -39,7 +54,11 @@ bool BTSPP::init() {
 
         ESP_LOGD(BT_SPP_TAG, "Enabled bluedroid");
 
+#if ESP_IDF_VERSION_MAJOR >= 5
         if ((err = esp_bt_gap_set_device_name(name.c_str())) != ESP_OK) {
+#else
+        if ((err = esp_bt_dev_set_device_name(name.c_str())) != ESP_OK) {
+#endif
             errMsg = "Failed to set device name: ";
             errMsg += esp_err_to_name(err);
             return false;

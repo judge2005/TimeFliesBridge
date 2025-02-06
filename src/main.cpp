@@ -7,8 +7,10 @@
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 #include "esp_mac.h"
 #endif
+#ifdef USE_BT
 #include "BTSPP.h"
 #include "BTGAP.h"
+#endif
 #include <esp_wifi.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -260,8 +262,10 @@ DNSServer dns;
 AsyncWiFiManager wifiManager(&server, &dns);
 ASyncOTAWebUpdate otaUpdater(Update, "update", "secretsauce");
 AsyncWiFiManagerParameter *hostnameParam;
+#ifdef USE_BT
 BTSPP btSPP(hostName.toString().c_str());
 BTGAP btGAP;
+#endif
 EspSNTPTimeSync *timeSync;
 TimeFliesClock timeFliesClock;
 
@@ -597,6 +601,7 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 	setLights(item, baselightsBlueTemplates);
 }
 
+#ifdef USE_BT
 SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
 void initSPP() {
@@ -694,11 +699,13 @@ void sppTaskFn(void *pArg) {
 		}
 
 		if (connectionStatus == CONNECTED) {
+#ifdef DISCONNECT_BT_ON_IDLE
 			if (millis() - lastConnectedTime > 30000) {
 				Logger::log(INFO, "Disconnecting");
 				btSPP.endConnection();
 				connectionStatus = DISCONNECTING;
 			}
+#endif
 		}
 
 		if (connectionStatus == NOT_CONNECTED) {
@@ -748,7 +755,7 @@ void sppTaskFn(void *pArg) {
 		}
 	}
 }
-
+#endif
 String* items[] {
 	&WSMenuHandler::clockMenu,
 	&WSMenuHandler::ledsMenu,
@@ -1062,7 +1069,9 @@ void setup() {
 	LEDs::getBaselightBlue().setCallback(onBlueBaselightsChanged);
 
 	WiFi.setSleep(false);
+#if CORE_DEBUG_LEVEL == ARDUHAL_LOG_LEVEL_DEBUG
     wifiManager.setDebugOutput(true);
+#endif
     wifiManager.setHostname(hostName.value.c_str()); // name router associates DNS entry with
     wifiManager.setCustomOptionsHTML("<br><form action='/t' name='time_form' method='post'><button name='time' onClick=\"{var now=new Date();this.value=now.getFullYear()+','+(now.getMonth()+1)+','+now.getDate()+','+now.getHours()+','+now.getMinutes()+','+now.getSeconds();} return true;\">Set Clock Time</button></form><br><form action=\"/app.html\" method=\"get\"><button>Configure Clock</button></form>");
     wifiManager.addParameter(hostnameParam);
@@ -1086,6 +1095,7 @@ void setup() {
 
 	hostName.setCallback(onHostnameChanged);
 
+#ifdef USE_BT
     xTaskCreatePinnedToCore(
         sppTaskFn,   /* Function to implement the task */
         "BT SPP task", /* Name of the task */
@@ -1094,7 +1104,7 @@ void setup() {
         tskIDLE_PRIORITY + 1,     /* More than background tasks */
         &sppTask,    /* Task handle. */
         xPortGetCoreID());
-
+#endif
     Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
