@@ -1,6 +1,4 @@
 #include <Arduino.h>
-#include "nvs.h"
-#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -47,29 +45,6 @@ const char *manifest[]{
 
 void broadcastUpdate(String originalKey, const BaseConfigItem& item);
 void broadcastUpdate(const JsonDocument &doc);
-
-struct LongConfigItem : public ConfigItem<uint64_t> {
-	LongConfigItem(const char *name, const uint64_t value)
-	: ConfigItem(name, sizeof(uint64_t), value)
-	{}
-
-	virtual void fromString(const String &s) { value = strtoull(s.c_str(), nullptr, 16); }
-	virtual String toJSON(bool bare = false, const char **excludes = 0) const { return String(value, 16); }
-	virtual String toString(const char **excludes = 0) const { return String(value, 16); }
-	LongConfigItem& operator=(const uint64_t val) { value = val; return *this; }
-};
-template <class T>
-void ConfigItem<T>::debug(Print *debugPrint) const {
-	if (debugPrint != 0) {
-		debugPrint->print(name);
-		debugPrint->print(":");
-		debugPrint->print(value);
-		debugPrint->print(" (");
-		debugPrint->print(maxSize);
-		debugPrint->println(")");
-	}
-}
-template void ConfigItem<uint64_t>::debug(Print *debugPrint) const;
 
 class Uptime {
 public:
@@ -240,21 +215,25 @@ int Logger::startLogIndex = 0;
 int Logger::numLogEntries = 0;
 char Logger::logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE] = {};
 
-enum HC05_STATE_ENUM {
-	INITIALIZED = 0,
-	READY,
-	PAIRABLE,
-	PAIRED,
-	INQUIRING,
-	CONNECTING,
-	CONNECTED,
-	DISCONNECTED,
-	NUKNOW
+typedef enum {
+	NOT_INITIALIZED = 0,
+    NOT_CONNECTED,
+    SEARCHING,
+    CONNECTING,
+    CONNECTED,
+	DISCONNECTING
+} SPPConnectionState;
+
+std::unordered_map<SPPConnectionState, std::string> state2string = {
+	{NOT_INITIALIZED, "NOT_INITIALIZED"},
+    {NOT_CONNECTED, "NOT_CONNECTED"},
+	{SEARCHING, "SEARCHING"},
+	{CONNECTED, "CONNECTED"},
+	{SEARCHING, "SEARCHING"},
+	{DISCONNECTING, "DISCONNECTING"}
 };
 
-
 StringConfigItem hostName("hostname", 63, "timefliesbridge");
-LongConfigItem tfAddress("address", 0);
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
@@ -323,7 +302,6 @@ CompositeConfigItem extraConfig("extra", 0, extraSet);
 // Global configuration
 BaseConfigItem* configSetGlobal[] = {
 	&hostName,
-    &tfAddress,
 	0
 };
 
@@ -371,22 +349,6 @@ void createSSID() {
 
 uint32_t cmdDelay = 1000;
 
-void asyncTimeSetCallback(String time) {
-	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
-
-	struct tm now;
-	suseconds_t uSec;
-
-	timeSync->getLocalTime(&now, &uSec);
-
-	// TODO set date format on clock
-	char msg[MAX_MSG_SIZE] = {0};
-	//	"0x13,$TIM,22,40,45,16,01,25***"
-	snprintf(msg, MAX_MSG_SIZE, "0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
-		now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
-	xQueueSend(sppQueue, msg, 0);
-}
-
 void pushAllValues() {
 	for (int i=0; ledsSet[i] != 0; i++) {
 		ledsSet[i]->notify();
@@ -409,13 +371,33 @@ void sendCommands(const char *commands) {
 
 		// Loop through the rest of the tokens
 		while (token != NULL) {
+			ESP_LOGD(TIME_FLIES_TAG, "Queueing command %s", token);
 			xQueueSend(sppQueue, token, 0);
 			token = strtok(NULL, delimiters);
 		}
 	} else {
+		ESP_LOGD(TIME_FLIES_TAG, "Queueing command %s", commands);
 		xQueueSend(sppQueue, commands, 0);
 	}
 }
+
+void asyncTimeSetCallback(String time) {
+	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
+
+	struct tm now;
+	suseconds_t uSec;
+
+	timeSync->getLocalTime(&now, &uSec);
+
+	// TODO set date format on clock
+	char msg[MAX_MSG_SIZE] = {0};
+	//	"0x13,$TIM,22,40,45,16,01,25***"
+	snprintf(msg, MAX_MSG_SIZE, "0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
+		now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
+	
+	sendCommands(msg);
+}
+
 void onCommandChanged(ConfigItem<String> &item) {
 	sendCommands(item.value.c_str());
 }
@@ -424,7 +406,7 @@ void onDateFormatChanged(ConfigItem<byte> &item) {
 	// TODO set date format on clock
 	char msg[MAX_MSG_SIZE] = {0};
 	snprintf(msg, MAX_MSG_SIZE, "0x13,$BIT12,%d***", item.value);
-	xQueueSend(sppQueue, msg, 0);
+	sendCommands(msg);
 }
 
 void onDisplayChanged(ConfigItem<int> &item) {
@@ -476,9 +458,9 @@ void onEffectChanged(ConfigItem<byte> &item) {
 
 void onHourFormatChanged(ConfigItem<boolean> &item) {
 	if (item) {
-		xQueueSend(sppQueue, "0x13,$BIT8,1***", 0);
+		sendCommands("0x13,$BIT8,1***");
 	} else {
-		xQueueSend(sppQueue, "0x13,$BIT8,0***", 0);
+		sendCommands("0x13,$BIT8,0***");
 	}
 }
 
@@ -556,7 +538,7 @@ void setLights(byte value, const char **pTemplates) {
 	cmdDelay = 1500;
 	while(*pTemplates) {
 		snprintf(msg, MAX_MSG_SIZE, *pTemplates, value);
-		xQueueSend(sppQueue, msg, 0);
+		sendCommands(msg);
 		pTemplates++;
 	}
 }
@@ -597,132 +579,46 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 	setLights(item, baselightsBlueTemplates);
 }
 
-HC05_STATE_ENUM connectionStatus = NUKNOW;
+SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
 #define RXD 16
 #define TXD 17
-String OK("OK\r\n");
+#define COMMAND_PIN 18
+String OK_RESPONSE("OK\r");
 
-bool verifyHC05Command(String command) {
+bool verifySPPCommand(String command) {
 	Serial1.println(command);
-	String result = Serial1.readStringUntil('\n');
-	bool ret = result.equals(OK);
+	String response = Serial1.readStringUntil('\n');
+	bool ret = response.equals(OK_RESPONSE);
 	if (!ret) {
-		ESP_LOGE(TIME_FLIES_TAG, "Unexpected result: %s", result.c_str());
+		ESP_LOGE(TIME_FLIES_TAG, "Unexpected response: %s", response.c_str());
 	}
+
+	return ret;
 }
 
-void initSPP() {
-/*
-AT+RMAAD (To clear any paired devices)
-AT+ROLE=1 (To set it as master)
-AT+CMODE=0 (To connect the module to the specified Bluetooth address and this Bluetooth address can be specified by the binding command)
-AT+BIND=xxxx,xx,xxxxxx (Now, type AT+BIND=98d3,34,906554 obviously with your respective address to the slave. Note the commas instead of colons given by the slave module.
-AT+UART=38400,0,0 (To fix the baud rate at 38400)
-*/
-	Serial1.begin(38400, SERIAL_8N1, RXD, TXD);
-	if (verifyHC05Command(String("AT+NAME=") + hostName) && verifyHC05Command("AT+RMAAD") && verifyHC05Command("AT+ROLE=1")) {
-		connectionStatus = INITIALIZED;
+void getSPPState() {
+	Serial1.println("AT+STATE");
+	String result = Serial1.readStringUntil('\n');
+	int status = result.charAt(0) - '0';
+	if (status >= 0 && status <= 9 && connectionStatus != status) {
+		connectionStatus = (SPPConnectionState)status;
+		Logger::log(INFO, "SPP Connection status=%s", state2string[connectionStatus].c_str());
 	}
+	// Read OK\r\n
+	result = Serial1.readStringUntil('\n');
+}
+
+void setRname() {
+	verifySPPCommand("AT+RNAME=Time Flies");
 }
 
 void initiateConnection() {
-	if (tfAddress != 0ULL) {
-		Logger::log(INFO, "Connecting to clock");
-		/*
-		AT+CMODE=0 (To connect the module to the specified Bluetooth address and this Bluetooth address can be specified by the binding command)
-		AT+BIND=xxxx,xx,xxxxxx (Now, type AT+BIND=98d3,34,906554 obviously with your 
-		*/
-		uint64_t uAddress = tfAddress;
-
-		char buf[30];
-		sprintf(buf, "AT+BIND=%02x%02x,%02x,%02x%02x%02x",
-            uAddress & 0xff,
-			(uAddress >> 8) & 0xff,
-			(uAddress >> 16) & 0xff,
-			(uAddress >> 24) & 0xff,
-			(uAddress >> 32) & 0xff,
-			(uAddress >> 40) & 0xff);
-
-		if (verifyHC05Command("AT+CMODE=0") && verifyHC05Command(buf)) {
-			connectionStatus = CONNECTING;
-		}
-	} else {
-		Logger::log(INFO, "Searching for clock");
-		// Max of 10 devices and wait at most 10 * 1.28s
-		if (verifyHC05Command("AT+INQM=1,10,10")) {
-			connectionStatus = INQUIRING;
-		}
-	}
+	verifySPPCommand("AT+CONNECT");
 }
 
 void closeConnection() {
-	/*
-		If Successful Disconnection:
-		+DISC:SUCCESS
-		OK
-		If Lose the connection:
-		+DISC:LINK_LOSS
-		OK
-		If No SLC connection:
-		+DISC:NO_SLC
-		OK
-		If Disconnection Timeout:
-		+DISC:TIMEOUT
-		OK
-		If Disconnection Error:
-		+DISC:ERROR
-		OK
-	*/
-	Serial1.println("AT+DISC");
-	Serial1.readStringUntil('\n');	// Response - we don't care
-	Serial1.readStringUntil('\n');	// OK
-}
-
-void getNamesFromHC05() {
-	/*
-	Send: AT+RNAME?0002,72,od2224
-	Read: +RNAME:Bluetooth
-	Read: OK
-	*/
-}
-
-const char *HC05_STATES[] = {
-	"INITIALIZED",
-	"READY",
-	"PAIRABLE",
-	"PAIRED",
-	"INQUIRING",
-	"CONNECTING",
-	"CONNECTED",
-	"DISCONNECTED",
-	"NUKNOW",
-	0
-};
-
-void updateHC05State() {
-	Serial1.println("AT+STATE?");
-	String result = Serial1.readStringUntil('\n');
-
-	if (strcmp(HC05_STATES[CONNECTED], result.c_str()) == 0) {
-		connectionStatus = CONNECTED;
-	}
-
-	if (strcmp(HC05_STATES[CONNECTING], result.c_str()) == 0) {
-		connectionStatus = CONNECTING;
-	}
-
-	if (strcmp(HC05_STATES[DISCONNECTED], result.c_str()) == 0) {
-		connectionStatus = DISCONNECTED;
-	}
-
-	if (strcmp(HC05_STATES[INITIALIZED], result.c_str()) == 0) {
-		connectionStatus = INITIALIZED;
-	}
-
-	if (strcmp(HC05_STATES[INQUIRING], result.c_str()) == 0) {
-		connectionStatus = INQUIRING;
-	}
+	verifySPPCommand("AT+DISCONNECT");
 }
 
 void sppTaskFn(void *pArg) {
@@ -733,32 +629,27 @@ void sppTaskFn(void *pArg) {
 	uint32_t delayNextMsg = 1;
 	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
 	uint32_t maxWait = 500;
+	setRname();
 	delay(10000);
 	uint32_t lastConnectedTime = millis();
+
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
 		uptime.loop();
 
-		if (result) {
+		getSPPState();
+
+		if (result == pdTRUE) {
 			if (connectionStatus == CONNECTED) {
 				// If we are connected, just drain the queue
 				lastConnectedTime = millis();
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
-
-#ifdef notdef
-				btSPP.write(msg);
-				if (btSPP.isError()) {
-					Logger::log(ERROR, "Error writing message: %s", btSPP.getErrMessage());
-				} else {
-					Logger::log(INFO, "Sent: %s", msg);
-				}
-#endif
+				Logger::log(INFO, "Sending command %s", msg);
+				Serial1.println(msg);
 				delayNextMsg = cmdDelay;
 				continue;
-			} else if (connectionStatus == NUKNOW) {
-				initSPP();	// Haven't initialzed BT yet
-			} else if (connectionStatus == INITIALIZED || connectionStatus == DISCONNECTED) {
+			} else if (connectionStatus == NOT_CONNECTED) {
 				initiateConnection();
 			}
 		} else {
@@ -784,41 +675,17 @@ void sppTaskFn(void *pArg) {
 		}
 
 		if (connectionStatus == CONNECTED) {
+#ifdef DISCONNECT_ON_DILE
 			if (millis() - lastConnectedTime > 30000) {
 				Logger::log(INFO, "Disconnecting");
 				closeConnection();
 			}
+#endif
 		}
 
-		if (connectionStatus == NUKNOW) {
-			initSPP();
+		if (connectionStatus == NOT_CONNECTED) {
+			initiateConnection();
 		}
-
-		if (connectionStatus == INQUIRING) {
-#ifdef notdef
-			if (btGAP.inquiryDone()) {
-                uint8_t *address = btGAP.getAddress("Time Flies");
-                if (address) {
-                    tfAddress =  ((uint64_t)address[0]) |
-                                ((uint64_t)address[1]) << 8 |
-                                ((uint64_t)address[2]) << 16 |
-                                ((uint64_t)address[3]) << 24 |
-                                ((uint64_t)address[4]) << 32 |
-                                ((uint64_t)address[5]) << 40
-                                ;
-                    tfAddress.put();
-                    config.commit();
-				}
-                connectionStatus = NOT_CONNECTED;
-            }
- #endif
-        }
-
-		if (connectionStatus == CONNECTING) {
-			// Don't need to do anythin here
-		}
-
-		updateHC05State();
 	}
 }
 
@@ -1086,6 +953,9 @@ void initFromEEPROM() {
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
+
+	pinMode(COMMAND_PIN, OUTPUT);
+  	Serial1.begin(38400, SERIAL_8N1, RXD, TXD);
 
 	wsMutex = xSemaphoreCreateMutex();
     sppQueue = xQueueCreate(SPP_QUEUE_SIZE, MAX_MSG_SIZE);
