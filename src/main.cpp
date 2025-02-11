@@ -62,7 +62,10 @@ private:
 };
 
 void Uptime::loop() {
-	xSemaphoreTake(utMutex, portMAX_DELAY);
+	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
+		return;
+	}
 
 	unsigned long now = millis();
 	if (lastMillis > now) {
@@ -74,7 +77,11 @@ void Uptime::loop() {
 }
 
 char *Uptime::uptime() {
-	xSemaphoreTake(utMutex, portMAX_DELAY);
+	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
+		*_return = 0;
+		return _return;
+	}
 
 	unsigned long long _now = (rollover << 32) + lastMillis;
 	unsigned long secs = _now / 1000LL, mins = secs / 60;
@@ -360,7 +367,7 @@ void pushAllValues() {
 }
 
 void sendCommands(const char *commands) {
-	static char buf[256];
+	static char buf[256 + MAX_MSG_SIZE];
 	if (strchr(commands, ';')) {
 		strncpy(buf, commands, 255);
 		char *token;
@@ -734,7 +741,11 @@ void infoCallback() {
 }
 
 void broadcastUpdate(const JsonDocument &doc) {
-	xSemaphoreTake(wsMutex, portMAX_DELAY);
+	if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain wsMutex");
+		return;
+	}
+
 	size_t len = measureJson(doc);
 
 	AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len); //  creates a buffer (len + 1) for you.
@@ -772,6 +783,8 @@ void updateValue(String originalKey, String _key, String value, BaseConfigItem *
 			setWiFiAP(value == "true" ? true : false);
 		} else if (_key == "push_all_values") {
 			pushAllValues();
+		} else if (_key == "push_time") {
+			asyncTimeSetCallback("Pushed from GUI");
 		}
 	} else {
 		String firstKey = _key.substring(0, index);
@@ -922,7 +935,10 @@ void wifiManagerTaskFn(void *pArg) {
 	ESP_LOGD(TIME_FLIES_TAG, "%s", "wifiManagerTaskFn()");
 
 	while(true) {
-		xSemaphoreTake(wsMutex, portMAX_DELAY);
+		if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+			ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain wsMutex");
+			continue;
+		}
 		wifiManager.loop();
 		xSemaphoreGive(wsMutex);
 
