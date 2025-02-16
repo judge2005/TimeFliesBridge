@@ -32,12 +32,11 @@ void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	JsonDocument doc;
 
 	doc["type"] = "sv.init.info";
-	size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+	size_t freeHeap = ESP.getFreeHeap();
 	size_t free8bitHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-	size_t free32bitHeap = heap_caps_get_free_size(MALLOC_CAP_32BIT);
+	size_t freeIRAMHeap = freeHeap - free8bitHeap;
 
-	doc["value"]["esp_free_iram_heap"] = free32bitHeap;
-	doc["value"]["esp_total_free_heap"] = freeHeap;
+	doc["value"]["esp_free_iram_heap"] = freeIRAMHeap;
 	doc["value"]["esp_free_heap"] = free8bitHeap;
 	doc["value"]["esp_free_heap_min"] = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
 	doc["value"]["esp_max_alloc_heap"] = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);

@@ -16,6 +16,7 @@
 #include <Update.h>
 #include <ASyncOTAWebUpdate.h>
 #include <EspSNTPTimeSync.h>
+#include <unordered_map>
 #include "WSHandler.h"
 #include "WSMenuHandler.h"
 #include "WSInfoHandler.h"
