@@ -22,7 +22,7 @@
 	<!-- endbuild -->
 
 	<!-- build:css script.css -->
-	<link rel="stylesheet" href="themes/dark.min.css" />
+	<link rel="stylesheet" href="themes/dark.css" />
 	<link rel="stylesheet" href="themes/jquery.mobile.icons.min.css" />
 	<link href="/jquery/mobile/1.4.5/jquery.mobile.structure-1.4.5.min.css" rel="stylesheet" />
 	<link href="/jquery/jquery.roundslider/1.3/roundslider.min.css" rel="stylesheet" />
@@ -67,18 +67,6 @@
 		
 		.spectrum {
 			width: 52px !important;
-		}
-
-		.red + .ui-slider-track {
-			background-image: linear-gradient(to right, black, red);	
-		}
-
-		.green + .ui-slider-track {
-			background-image: linear-gradient(to right, black, green);
-		}
-
-		.blue + .ui-slider-track {
-			background-image: ilinear-gradient(to right, black, blue);
 		}
 
 		.ui-fieldset {
@@ -167,14 +155,6 @@
 		.item-disabled {
     		pointer-events: none;
     		/* other styles: grayed background etc. */
-		}
-
-		#test .rs-seperator {
-			border-width: 0px;
-		}
-
-		#test .rs-handle {
-			background-color: #3080c0;
 		}
 
 		#color-box {
@@ -419,25 +399,41 @@
 				clockColors[fieldsetId]['blue'] = val;
 			}
 
-			var rgb = "rgb(" + clockColors[fieldsetId]['red'] + ", " + clockColors[fieldsetId]['green'] + ", " + clockColors[fieldsetId]['blue'] + ")";
-			var css = "linear-gradient(to right, " + rgb + ", " + rgb + ")";
-
-			fieldset.find(".ui-slider-track").each(function (i, track) {
-				$(track).css({"background-image": css});
-			});
+			var rgb;
+			var css;
 
 			/*
-			var handle = fieldset.find(".red + .ui-slider-track").find(".ui-slider-handle");
-			css = "rgb(" + clockColors[fieldsetId]['red'] + ", 0, 0)";
-			handle.css({"background-color": css});
+			var rgb = "rgb(" + clockColors[fieldsetId]['red'] + ", 0, 0)";
+			var css = "linear-gradient(to right, black, " + rgb + ")";			
+			fieldset.find(".red + .ui-slider-track").find(".ui-slider-bg").css({"background-image": css});
 
-			handle = fieldset.find(".green + .ui-slider-track").find(".ui-slider-handle");
-			css = "rgb(0, " + clockColors[fieldsetId]['green'] + ", 0)";
-			handle.css({"background-color": css});
+			rgb = "rgb(0, " + clockColors[fieldsetId]['green'] + ", 0)";
+			css = "linear-gradient(to right, black, " + rgb + ")";			
+			fieldset.find(".green + .ui-slider-track").find(".ui-slider-bg").css({"background-image": css});
+			
+			rgb = "rgb(0, 0, " + clockColors[fieldsetId]['blue'] + ")";
+			css = "linear-gradient(to right, black, " + rgb + ")";			
+			fieldset.find(".blue + .ui-slider-track").find(".ui-slider-bg").css({"background-image": css});
+			*/
 
-			handle = fieldset.find(".blue + .ui-slider-track").find(".ui-slider-handle");
-			css = "rgb(0, 0, " + clockColors[fieldsetId]['blue'] + ")";
-			handle.css({"background-color": css});
+			rgb = "rgb(" + clockColors[fieldsetId]['red'] + ", " + clockColors[fieldsetId]['green'] + ", " + clockColors[fieldsetId]['blue'] + ")";
+			css = "linear-gradient(to right, " + rgb + ", " + rgb + ")";	
+			fieldset.find(".ui-slider-bg").css({"background-color": rgb});
+
+
+			/*
+			rgb = "rgb(" + clockColors[fieldsetId]['red'] + ", 0, 0)";
+			fieldset.find(".red + .ui-slider-track").find(".ui-slider-handle").css({"background-color": rgb});
+
+			rgb = "rgb(0, " + clockColors[fieldsetId]['green'] + ", 0)";
+			fieldset.find(".green + .ui-slider-track").find(".ui-slider-handle").css({"background-color": rgb});
+			
+			rgb = "rgb(0, 0, " + clockColors[fieldsetId]['blue'] + ")";
+			fieldset.find(".blue + .ui-slider-track").find(".ui-slider-handle").css({"background-color": rgb});
+			*/
+
+			/*
+			fieldset.find(".ui-slider-track").find(".ui-slider-handle").css({"background-color": rgb});
 			*/
 		}
 
@@ -516,6 +512,7 @@
 					case "sv.init.leds":	// Received initialization object
 					case "sv.init.extra":	// Received initialization object
 					case "sv.init.info":	// Received initialization object
+					case "sv.init.theme_test":	// Received initialization object
 						console.log(msg.type);
 						updateElements(msg.value);
 						break;

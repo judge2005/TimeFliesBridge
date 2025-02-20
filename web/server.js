@@ -32,7 +32,8 @@ var pages = {
 			{"1": { "url" : "clock.html", "title" : "Clock" }},
 			{"2": { "url" : "leds.html", "title" : "LEDs" }},
 			{"3": { "url" : "extra.html", "title" : "Extra" }},
-			{"4": { "url" : "info.html", "title" : "Info" }}
+			{"4": { "url" : "info.html", "title" : "Info" }},
+			{"5": { "url" : "theme_test.html", "title" : "Theme Test" }}
 		]
 	}
 
@@ -46,17 +47,17 @@ var sendPages = function(conn) {
 	console.log(json);
 }
 
-var sendLEDValues = function(conn) {
-	var json = '{"type":"sv.init.leds","value":';
-	json += JSON.stringify(state[2]);
+var sendClockValues = function(conn) {
+	var json = '{"type":"sv.init.clock","value":';
+	json += JSON.stringify(state[1]);
 	json += '}';
 	console.log(json);
 	conn.send(json);
 }
 
-var sendClockValues = function(conn) {
-	var json = '{"type":"sv.init.clock","value":';
-	json += JSON.stringify(state[1]);
+var sendLEDValues = function(conn) {
+	var json = '{"type":"sv.init.leds","value":';
+	json += JSON.stringify(state[2]);
 	json += '}';
 	console.log(json);
 	conn.send(json);
@@ -73,6 +74,14 @@ var sendExtrasValues = function(conn) {
 var sendInfoValues = function(conn) {
 	var json = '{"type":"sv.init.info","value":';
 	json += JSON.stringify(state[4]);
+	json += '}';
+	console.log(json);
+	conn.send(json);
+}
+
+var sendThemeTestValues = function(conn) {
+	var json = '{"type":"sv.init.theme_test","value":';
+	json += JSON.stringify(state[5]);
 	json += '}';
 	console.log(json);
 	conn.send(json);
@@ -119,6 +128,12 @@ var state = {
 		'wifi_mac_address' : "0E:12:34:56:78",
 		'wifi_ssid' : "STC-Wonderful",
 		'up_time' : "2567 days 12:00:01"
+	},
+	"5": {
+		'radio_set' : 2,
+		'checkbox_set_one' : true,
+		'checkbox_set_two' : false,
+		'checkbox_set_three' : true
 	}
 }
 
@@ -191,6 +206,9 @@ wss.on('connection', function(conn) {
 			break;
 		case 4:
 			sendInfoValues(conn);
+			break;
+		case 5:
+			sendThemeTestValues(conn);
 			break;
 		case 9:
     		message = message.substring(message.indexOf(':')+1);
