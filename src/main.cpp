@@ -251,7 +251,6 @@ ASyncOTAWebUpdate otaUpdater(Update, "update", "secretsauce");
 AsyncWiFiManagerParameter *hostnameParam;
 EspSNTPTimeSync *timeSync;
 TimeFliesClock timeFliesClock;
-int tzOffset = 0;
 
 TaskHandle_t commitEEPROMTask;
 TaskHandle_t sppTask;
@@ -356,13 +355,6 @@ void createSSID() {
 	ssid = (chipId + hostName).substring(0, 31);
 }
 
-void calculateTZOffset() {
-	const time_t epoch_plus_11h = 60 * 60 * 11;
-	const int local_time = localtime(&epoch_plus_11h)->tm_hour;
-	const int gm_time = gmtime(&epoch_plus_11h)->tm_hour;
-	tzOffset = local_time - gm_time;
-}
-
 uint32_t cmdDelay = 1000;
 
 void pushAllValues() {
@@ -397,28 +389,32 @@ void sendCommands(const char *commands) {
 	}
 }
 
-void asyncTimeSetCallback(String time) {
-	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
-
+void sendCurrentTime() {
 	struct tm now;
 	suseconds_t uSec;
 
 	timeSync->getLocalTime(&now, &uSec);
-	calculateTZOffset();
 
 	char msg[128] = {0};
 	// Set timezone offset - 0x13,$PSU,6,4,20,6*** values 1-12 are added, 13-23 are subtracted -12 so 13 becomes -1.
 	// EST                   0x13,$PSU,6,4,17,6*** i.e. TZ offset = 12 - 17 = -5
-	int tzo = tzOffset;
-	if (tzOffset < 0) {
-		tzo = 12 - tzOffset;
+	int tzo = -(_timezone / 60 / 60);
+
+	if (tzo < 0) {
+		tzo = 12 - tzo;
 	}
 
 	//	"0x13,$TIM,22,40,45,16,01,25***"
-	snprintf(msg, 128, "0x13,$PSU,6,4,%d,6***;0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
-		tzo, now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
+	snprintf(msg, 128, "0x13,$BIT13,%d***;0x13,$PSU,6,4,%d,6***;0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
+		now.tm_isdst, tzo, now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
 	
 	sendCommands(msg);
+}
+
+void asyncTimeSetCallback(String time) {
+	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
+
+	sendCurrentTime();
 }
 
 void onCommandChanged(ConfigItem<String> &item) {
@@ -488,11 +484,8 @@ void onHourFormatChanged(ConfigItem<boolean> &item) {
 }
 
 void onTimezoneChanged(ConfigItem<String> &tzItem) {
-	calculateTZOffset();
-
 	timeSync->setTz(tzItem);
-	timeSync->sync();
-	// Time will be pushed on sync callback
+	sendCurrentTime();
 }
 
 const char *backlightsRedTemplates[] = {
@@ -670,7 +663,7 @@ void sppTaskFn(void *pArg) {
 				lastConnectedTime = millis();
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
-				Logger::log(INFO, "Sending command %s", msg);
+				Logger::log(INFO, "> %s", msg);
 				Serial1.println(msg);
 				delayNextMsg = cmdDelay;
 				continue;
@@ -1001,7 +994,6 @@ void setup() {
 
 	LittleFS.begin();
 
-	calculateTZOffset();
 	timeSync = new EspSNTPTimeSync(TimeFliesClock::getTimeZone(), asyncTimeSetCallback, NULL);
 	timeSync->init();
 
@@ -1071,7 +1063,7 @@ void setup() {
 
     Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
 
-    // vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
+    vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }
 
 void loop() {
