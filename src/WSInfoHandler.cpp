@@ -38,6 +38,7 @@ void WSInfoHandler::handle(AsyncWebSocketClient *client, const char *data) {
 
 	doc["value"]["esp_free_iram_heap"] = freeIRAMHeap;
 	doc["value"]["esp_free_heap"] = free8bitHeap;
+	doc["value"]["esp_total_free_heap"] = freeHeap;
 	doc["value"]["esp_free_heap_min"] = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
 	doc["value"]["esp_max_alloc_heap"] = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 	doc["value"]["esp_sketch_size"] = sketchSize(SKETCH_SIZE_TOTAL);

@@ -236,8 +236,8 @@ std::unordered_map<SPPConnectionState, std::string> state2string = {
 	{NOT_INITIALIZED, "NOT_INITIALIZED"},
     {NOT_CONNECTED, "NOT_CONNECTED"},
 	{SEARCHING, "SEARCHING"},
+	{CONNECTING, "CONNECTING"},
 	{CONNECTED, "CONNECTED"},
-	{SEARCHING, "SEARCHING"},
 	{DISCONNECTING, "DISCONNECTING"}
 };
 
@@ -409,6 +409,41 @@ void sendCurrentTime() {
 		now.tm_isdst, tzo, now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
 	
 	sendCommands(msg);
+}
+
+uint8_t r_buffer[50];
+uint8_t r_position = 0;
+
+void readFromServer() {
+    while (Serial1.available() > 0) {
+        int c = Serial1.read();
+        if (c > 0) {
+            delay(1);
+            if (r_position < sizeof(r_buffer)) {
+                if (c == '\n') {
+                    if (r_position >= 1 && r_buffer[r_position-1] == '\r') {
+                        r_buffer[r_position-1] = 0;
+                    } else {
+                        r_buffer[r_position] = 0;
+                    }
+
+					// If there was something other than just CRLF
+					if (r_position > 1) {
+						Logger::log(INFO, "< %s", r_buffer);
+					}
+
+                    r_position = 0;
+                } else {
+                    r_buffer[r_position++] = c;
+                }
+            } else {
+                if (c == '\n') {
+                    ESP_LOGE(TIME_FLIES_TAG, "Receive buffer overlow");
+                    r_position = 0;
+                }
+            }
+        }
+    }
 }
 
 void asyncTimeSetCallback(String time) {
@@ -609,7 +644,7 @@ bool verifySPPCommand(String command) {
 	String response = Serial1.readStringUntil('\n');
 	bool ret = response.equals(OK_RESPONSE);
 	if (!ret) {
-		ESP_LOGE(TIME_FLIES_TAG, "Unexpected response: %s", response.c_str());
+		Logger::log(WARN, "! %s", response.c_str());
 	}
 
 	return ret;
@@ -619,12 +654,19 @@ void getSPPState() {
 	Serial1.println("AT+STATE");
 	String result = Serial1.readStringUntil('\n');
 	int status = result.charAt(0) - '0';
-	if (status >= 0 && status <= 9 && connectionStatus != status) {
-		connectionStatus = (SPPConnectionState)status;
-		Logger::log(INFO, "SPP Connection status=%s", state2string[connectionStatus].c_str());
+	if (status >= 0 && status <= 9) {
+		if (connectionStatus != status) {
+			connectionStatus = (SPPConnectionState)status;
+			Logger::log(INFO, "+ %s", state2string[connectionStatus].c_str());
+		}
+	} else {
+		Logger::log(WARN, "! %s", result.c_str());
 	}
 	// Read OK\r\n
-	result = Serial1.readStringUntil('\n');
+	do
+	{	
+		result = Serial1.readStringUntil('\n');
+	} while (!result.equals(OK_RESPONSE));
 }
 
 void setRname() {
@@ -655,6 +697,7 @@ void sppTaskFn(void *pArg) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
 		uptime.loop();
 
+		readFromServer();	// Do this before we send a command in getSPPState();
 		getSPPState();
 
 		if (result == pdTRUE) {
