@@ -634,6 +634,7 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 
 SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
+#define LED_PIN 2
 #define RXD 16
 #define TXD 17
 #define COMMAND_PIN 18
@@ -662,10 +663,15 @@ void getSPPState() {
 	} else {
 		Logger::log(WARN, "! %s", result.c_str());
 	}
-	// Read OK\r\n
+	// Read OK\r\n - keep going until we get OK or until 1s passes
+	unsigned long start = millis();
 	do
 	{	
 		result = Serial1.readStringUntil('\n');
+		if (millis() - start > 1000) {
+			// Give up after 1s
+			break;
+		}
 	} while (!result.equals(OK_RESPONSE));
 }
 
@@ -692,6 +698,8 @@ void sppTaskFn(void *pArg) {
 	setRname();
 	delay(10000);
 	uint32_t lastConnectedTime = millis();
+	bool ledOn = false;
+	uint32_t lastLedOn = millis();
 
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
@@ -736,6 +744,7 @@ void sppTaskFn(void *pArg) {
 		}
 
 		if (connectionStatus == CONNECTED) {
+			ledOn = true;
 #ifdef DISCONNECT_ON_DILE
 			if (millis() - lastConnectedTime > 30000) {
 				Logger::log(INFO, "Disconnecting");
@@ -746,6 +755,17 @@ void sppTaskFn(void *pArg) {
 
 		if (connectionStatus == NOT_CONNECTED) {
 			initiateConnection();
+		}
+
+		if (ledOn) {
+			digitalWrite(LED_PIN, HIGH);
+		} else {
+			digitalWrite(LED_PIN, LOW);
+		}
+
+		if (millis() - lastLedOn > 1000) {
+			lastLedOn = millis();
+			ledOn = !ledOn;
 		}
 	}
 }
@@ -1025,6 +1045,7 @@ void setup() {
     Serial.setDebugOutput(true);
 
 	pinMode(COMMAND_PIN, OUTPUT);
+	pinMode(LED_PIN, OUTPUT);
   	Serial1.begin(38400, SERIAL_8N1, RXD, TXD);
 
 	wsMutex = xSemaphoreCreateMutex();
