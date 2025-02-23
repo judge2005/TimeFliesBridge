@@ -1,15 +1,9 @@
 #include <Arduino.h>
-#include "nvs.h"
-#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 #include "esp_mac.h"
-#endif
-#ifdef USE_BT
-#include "BTSPP.h"
-#include "BTGAP.h"
 #endif
 #include <esp_wifi.h>
 #include <ArduinoJson.h>
@@ -22,6 +16,7 @@
 #include <Update.h>
 #include <ASyncOTAWebUpdate.h>
 #include <EspSNTPTimeSync.h>
+#include <unordered_map>
 #include "WSHandler.h"
 #include "WSMenuHandler.h"
 #include "WSInfoHandler.h"
@@ -52,29 +47,6 @@ const char *manifest[]{
 void broadcastUpdate(String originalKey, const BaseConfigItem& item);
 void broadcastUpdate(const JsonDocument &doc);
 
-struct LongConfigItem : public ConfigItem<uint64_t> {
-	LongConfigItem(const char *name, const uint64_t value)
-	: ConfigItem(name, sizeof(uint64_t), value)
-	{}
-
-	virtual void fromString(const String &s) { value = strtoull(s.c_str(), nullptr, 16); }
-	virtual String toJSON(bool bare = false, const char **excludes = 0) const { return String(value, 16); }
-	virtual String toString(const char **excludes = 0) const { return String(value, 16); }
-	LongConfigItem& operator=(const uint64_t val) { value = val; return *this; }
-};
-template <class T>
-void ConfigItem<T>::debug(Print *debugPrint) const {
-	if (debugPrint != 0) {
-		debugPrint->print(name);
-		debugPrint->print(":");
-		debugPrint->print(value);
-		debugPrint->print(" (");
-		debugPrint->print(maxSize);
-		debugPrint->println(")");
-	}
-}
-template void ConfigItem<uint64_t>::debug(Print *debugPrint) const;
-
 class Uptime {
 public:
 	Uptime() {
@@ -91,7 +63,10 @@ private:
 };
 
 void Uptime::loop() {
-	xSemaphoreTake(utMutex, portMAX_DELAY);
+	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
+		return;
+	}
 
 	unsigned long now = millis();
 	if (lastMillis > now) {
@@ -103,7 +78,11 @@ void Uptime::loop() {
 }
 
 char *Uptime::uptime() {
-	xSemaphoreTake(utMutex, portMAX_DELAY);
+	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
+		*_return = 0;
+		return _return;
+	}
 
 	unsigned long long _now = (rollover << 32) + lastMillis;
 	unsigned long secs = _now / 1000LL, mins = secs / 60;
@@ -253,8 +232,16 @@ typedef enum {
 	DISCONNECTING
 } SPPConnectionState;
 
+std::unordered_map<SPPConnectionState, std::string> state2string = {
+	{NOT_INITIALIZED, "NOT_INITIALIZED"},
+    {NOT_CONNECTED, "NOT_CONNECTED"},
+	{SEARCHING, "SEARCHING"},
+	{CONNECTING, "CONNECTING"},
+	{CONNECTED, "CONNECTED"},
+	{DISCONNECTING, "DISCONNECTING"}
+};
+
 StringConfigItem hostName("hostname", 63, "timefliesbridge");
-LongConfigItem tfAddress("address", 0);
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
@@ -262,10 +249,6 @@ DNSServer dns;
 AsyncWiFiManager wifiManager(&server, &dns);
 ASyncOTAWebUpdate otaUpdater(Update, "update", "secretsauce");
 AsyncWiFiManagerParameter *hostnameParam;
-#ifdef USE_BT
-BTSPP btSPP(hostName.toString().c_str());
-BTGAP btGAP;
-#endif
 EspSNTPTimeSync *timeSync;
 TimeFliesClock timeFliesClock;
 
@@ -327,7 +310,6 @@ CompositeConfigItem extraConfig("extra", 0, extraSet);
 // Global configuration
 BaseConfigItem* configSetGlobal[] = {
 	&hostName,
-    &tfAddress,
 	0
 };
 
@@ -375,22 +357,6 @@ void createSSID() {
 
 uint32_t cmdDelay = 1000;
 
-void asyncTimeSetCallback(String time) {
-	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
-
-	struct tm now;
-	suseconds_t uSec;
-
-	timeSync->getLocalTime(&now, &uSec);
-
-	// TODO set date format on clock
-	char msg[MAX_MSG_SIZE] = {0};
-	//	"0x13,$TIM,22,40,45,16,01,25***"
-	snprintf(msg, MAX_MSG_SIZE, "0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
-		now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
-	xQueueSend(sppQueue, msg, 0);
-}
-
 void pushAllValues() {
 	for (int i=0; ledsSet[i] != 0; i++) {
 		ledsSet[i]->notify();
@@ -402,7 +368,7 @@ void pushAllValues() {
 }
 
 void sendCommands(const char *commands) {
-	static char buf[256];
+	static char buf[256 + MAX_MSG_SIZE];
 	if (strchr(commands, ';')) {
 		strncpy(buf, commands, 255);
 		char *token;
@@ -413,13 +379,79 @@ void sendCommands(const char *commands) {
 
 		// Loop through the rest of the tokens
 		while (token != NULL) {
+			ESP_LOGD(TIME_FLIES_TAG, "Queueing command %s", token);
 			xQueueSend(sppQueue, token, 0);
 			token = strtok(NULL, delimiters);
 		}
 	} else {
+		ESP_LOGD(TIME_FLIES_TAG, "Queueing command %s", commands);
 		xQueueSend(sppQueue, commands, 0);
 	}
 }
+
+void sendCurrentTime() {
+	struct tm now;
+	suseconds_t uSec;
+
+	timeSync->getLocalTime(&now, &uSec);
+
+	char msg[128] = {0};
+	// Set timezone offset - 0x13,$PSU,6,4,20,6*** values 1-12 are added, 13-23 are subtracted -12 so 13 becomes -1.
+	// EST                   0x13,$PSU,6,4,17,6*** i.e. TZ offset = 12 - 17 = -5
+	int tzo = -(_timezone / 60 / 60);
+
+	if (tzo < 0) {
+		tzo = 12 - tzo;
+	}
+
+	//	"0x13,$TIM,22,40,45,16,01,25***"
+	snprintf(msg, 128, "0x13,$BIT13,%d***;0x13,$PSU,6,4,%d,6***;0x13,$TIM,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d,%2.2d***",
+		now.tm_isdst, tzo, now.tm_hour, now.tm_min, now.tm_sec, now.tm_mday, now.tm_mon, now.tm_year);
+	
+	sendCommands(msg);
+}
+
+uint8_t r_buffer[50];
+uint8_t r_position = 0;
+
+void readFromServer() {
+    while (Serial1.available() > 0) {
+        int c = Serial1.read();
+        if (c > 0) {
+            delay(1);
+            if (r_position < sizeof(r_buffer)) {
+                if (c == '\n') {
+                    if (r_position >= 1 && r_buffer[r_position-1] == '\r') {
+                        r_buffer[r_position-1] = 0;
+                    } else {
+                        r_buffer[r_position] = 0;
+                    }
+
+					// If there was something other than just CRLF
+					if (r_position > 1) {
+						Logger::log(INFO, "< %s", r_buffer);
+					}
+
+                    r_position = 0;
+                } else {
+                    r_buffer[r_position++] = c;
+                }
+            } else {
+                if (c == '\n') {
+                    ESP_LOGE(TIME_FLIES_TAG, "Receive buffer overlow");
+                    r_position = 0;
+                }
+            }
+        }
+    }
+}
+
+void asyncTimeSetCallback(String time) {
+	ESP_LOGD(TIME_FLIES_TAG, "Time: %s", time.c_str());
+
+	sendCurrentTime();
+}
+
 void onCommandChanged(ConfigItem<String> &item) {
 	sendCommands(item.value.c_str());
 }
@@ -428,7 +460,7 @@ void onDateFormatChanged(ConfigItem<byte> &item) {
 	// TODO set date format on clock
 	char msg[MAX_MSG_SIZE] = {0};
 	snprintf(msg, MAX_MSG_SIZE, "0x13,$BIT12,%d***", item.value);
-	xQueueSend(sppQueue, msg, 0);
+	sendCommands(msg);
 }
 
 void onDisplayChanged(ConfigItem<int> &item) {
@@ -480,16 +512,15 @@ void onEffectChanged(ConfigItem<byte> &item) {
 
 void onHourFormatChanged(ConfigItem<boolean> &item) {
 	if (item) {
-		xQueueSend(sppQueue, "0x13,$BIT8,1***", 0);
+		sendCommands("0x13,$BIT8,1***");
 	} else {
-		xQueueSend(sppQueue, "0x13,$BIT8,0***", 0);
+		sendCommands("0x13,$BIT8,0***");
 	}
 }
 
 void onTimezoneChanged(ConfigItem<String> &tzItem) {
 	timeSync->setTz(tzItem);
-	timeSync->sync();
-	// Time will be pushed on sync callback
+	sendCurrentTime();
 }
 
 const char *backlightsRedTemplates[] = {
@@ -560,7 +591,7 @@ void setLights(byte value, const char **pTemplates) {
 	cmdDelay = 1500;
 	while(*pTemplates) {
 		snprintf(msg, MAX_MSG_SIZE, *pTemplates, value);
-		xQueueSend(sppQueue, msg, 0);
+		sendCommands(msg);
 		pTemplates++;
 	}
 }
@@ -601,78 +632,92 @@ void onBlueBaselightsChanged(ConfigItem<byte> &item) {
 	setLights(item, baselightsBlueTemplates);
 }
 
-#ifdef USE_BT
 SPPConnectionState connectionStatus = NOT_INITIALIZED;
 
-void initSPP() {
-	WiFi.setSleep(true);
-	if (!btSPP.inited()) {
-		if (btSPP.init()) {
-			if (btGAP.init()) {
-				connectionStatus = NOT_CONNECTED;
-			} else {
-				Logger::log(ERROR, "GAP initialization failed: %s", btGAP.getErrMessage().c_str());
-			}
-		} else {
-			Logger::log(ERROR, "BT initialization failed: %s", btSPP.getErrMessage().c_str());
-		}
+#define LED_PIN 2
+#define RXD 16
+#define TXD 17
+#define COMMAND_PIN 18
+String OK_RESPONSE("OK\r");
+
+bool verifySPPCommand(String command) {
+	Serial1.println(command);
+	String response = Serial1.readStringUntil('\n');
+	bool ret = response.equals(OK_RESPONSE);
+	if (!ret) {
+		Logger::log(WARN, "! %s", response.c_str());
 	}
+
+	return ret;
+}
+
+void getSPPState() {
+	Serial1.println("AT+STATE");
+	String result = Serial1.readStringUntil('\n');
+	int status = result.charAt(0) - '0';
+	if (status >= 0 && status <= 9) {
+		if (connectionStatus != status) {
+			connectionStatus = (SPPConnectionState)status;
+			Logger::log(INFO, "+ %s", state2string[connectionStatus].c_str());
+		}
+	} else {
+		Logger::log(WARN, "! %s", result.c_str());
+	}
+	// Read OK\r\n - keep going until we get OK or until 1s passes
+	unsigned long start = millis();
+	do
+	{	
+		result = Serial1.readStringUntil('\n');
+		if (millis() - start > 1000) {
+			// Give up after 1s
+			break;
+		}
+	} while (!result.equals(OK_RESPONSE));
+}
+
+void setRname() {
+	verifySPPCommand("AT+RNAME=Time Flies");
 }
 
 void initiateConnection() {
-	if (tfAddress != 0ULL) {
-		Logger::log(INFO, "Connecting to clock");
-		connectionStatus = CONNECTING;
-		uint64_t uAddress = tfAddress;
-		esp_bd_addr_t address = {0};
-		address[0] = uAddress & 0xff;
-		address[1] = (uAddress >> 8) & 0xff;
-		address[2] = (uAddress >> 16) & 0xff;
-		address[3] = (uAddress >> 24) & 0xff;
-		address[4] = (uAddress >> 32) & 0xff;
-		address[5] = (uAddress >> 40) & 0xff;
-		
-		btSPP.startConnection(address);
-	} else {
-		connectionStatus = SEARCHING;
-		Logger::log(INFO, "Searching for clock");
-		if (!btGAP.startInquiry()) {
-			Logger::log(ERROR, "Error starting inqury: %s", btGAP.getErrMessage());
-			connectionStatus = NOT_CONNECTED;
-		}
-	}
+	verifySPPCommand("AT+CONNECT");
 }
+
+void closeConnection() {
+	verifySPPCommand("AT+DISCONNECT");
+}
+
 void sppTaskFn(void *pArg) {
     static char msg[MAX_MSG_SIZE];
 
-	timeSync->init();
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "sppTaskFn()");
 
 	uint32_t delayNextMsg = 1;
 	bool wasOn = !timeFliesClock.clockOn();	// Force a clock state message initially
 	uint32_t maxWait = 500;
+	setRname();
 	delay(10000);
 	uint32_t lastConnectedTime = millis();
+	bool ledOn = false;
+	uint32_t lastLedOn = millis();
+
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
 		uptime.loop();
 
-		if (result) {
+		readFromServer();	// Do this before we send a command in getSPPState();
+		getSPPState();
+
+		if (result == pdTRUE) {
 			if (connectionStatus == CONNECTED) {
 				// If we are connected, just drain the queue
 				lastConnectedTime = millis();
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
-
-				btSPP.write(msg);
-				if (btSPP.isError()) {
-					Logger::log(ERROR, "Error writing message: %s", btSPP.getErrMessage());
-				} else {
-					Logger::log(INFO, "Sent: %s", msg);
-				}
+				Logger::log(INFO, "> %s", msg);
+				Serial1.println(msg);
 				delayNextMsg = cmdDelay;
 				continue;
-			} else if (connectionStatus == NOT_INITIALIZED) {
-				initSPP();	// Haven't initialzed BT yet
 			} else if (connectionStatus == NOT_CONNECTED) {
 				initiateConnection();
 			}
@@ -699,63 +744,32 @@ void sppTaskFn(void *pArg) {
 		}
 
 		if (connectionStatus == CONNECTED) {
-#ifdef DISCONNECT_BT_ON_IDLE
+			ledOn = true;
+#ifdef DISCONNECT_ON_DILE
 			if (millis() - lastConnectedTime > 30000) {
 				Logger::log(INFO, "Disconnecting");
-				btSPP.endConnection();
-				connectionStatus = DISCONNECTING;
+				closeConnection();
 			}
 #endif
 		}
 
 		if (connectionStatus == NOT_CONNECTED) {
-			// if (!btSPP.inited()) {
-			// 	connectionStatus = NOT_INITIALIZED;
-			// 	WiFi.setSleep(false);
-			// }
+			initiateConnection();
 		}
 
-		if (connectionStatus == DISCONNECTING) {
-			if (!btSPP.connectionDone()) {
-				Logger::log(INFO, "Disconnected");
-				// btSPP.deInit();
-				connectionStatus = NOT_CONNECTED;
-			}
+		if (ledOn) {
+			digitalWrite(LED_PIN, HIGH);
+		} else {
+			digitalWrite(LED_PIN, LOW);
 		}
 
-		if (connectionStatus == SEARCHING) {
-			if (btGAP.inquiryDone()) {
-                uint8_t *address = btGAP.getAddress("Time Flies");
-                if (address) {
-                    tfAddress =  ((uint64_t)address[0]) |
-                                ((uint64_t)address[1]) << 8 |
-                                ((uint64_t)address[2]) << 16 |
-                                ((uint64_t)address[3]) << 24 |
-                                ((uint64_t)address[4]) << 32 |
-                                ((uint64_t)address[5]) << 40
-                                ;
-                    tfAddress.put();
-                    config.commit();
-				}
-                connectionStatus = NOT_CONNECTED;
-            }
-        }
-
-		if (connectionStatus == CONNECTING) {
-			// Connecting might fail - re-initiate the connection attempt
-			if (btSPP.isError()) {
-				Logger::log(INFO, btSPP.getErrMessage().c_str());
-				initiateConnection();
-			}
-
-			if (btSPP.connectionDone()) {
-				Logger::log(INFO, "Connected");
-				connectionStatus = CONNECTED;
-			}
+		if (millis() - lastLedOn > 1000) {
+			lastLedOn = millis();
+			ledOn = !ledOn;
 		}
 	}
 }
-#endif
+
 String* items[] {
 	&WSMenuHandler::clockMenu,
 	&WSMenuHandler::ledsMenu,
@@ -801,7 +815,11 @@ void infoCallback() {
 }
 
 void broadcastUpdate(const JsonDocument &doc) {
-	xSemaphoreTake(wsMutex, portMAX_DELAY);
+	if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain wsMutex");
+		return;
+	}
+
 	size_t len = measureJson(doc);
 
 	AsyncWebSocketMessageBuffer * buffer = ws.makeBuffer(len); //  creates a buffer (len + 1) for you.
@@ -839,6 +857,8 @@ void updateValue(String originalKey, String _key, String value, BaseConfigItem *
 			setWiFiAP(value == "true" ? true : false);
 		} else if (_key == "push_all_values") {
 			pushAllValues();
+		} else if (_key == "push_time") {
+			asyncTimeSetCallback("Pushed from GUI");
 		}
 	} else {
 		String firstKey = _key.substring(0, index);
@@ -986,8 +1006,13 @@ void setupServer() {
 }
 
 void wifiManagerTaskFn(void *pArg) {
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "wifiManagerTaskFn()");
+
 	while(true) {
-		xSemaphoreTake(wsMutex, portMAX_DELAY);
+		if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+			ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain wsMutex");
+			continue;
+		}
 		wifiManager.loop();
 		xSemaphoreGive(wsMutex);
 
@@ -996,6 +1021,7 @@ void wifiManagerTaskFn(void *pArg) {
 }
 
 void commitEEPROMTaskFn(void *pArg) {
+	ESP_LOGD(TIME_FLIES_TAG, "%s", "commitEEPROMTaskFn()");
 	while(true) {
 		delay(60000);
 		ESP_LOGD(TIME_FLIES_TAG, "Committing config");
@@ -1018,13 +1044,9 @@ void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
 
-    /* Initialize NVS — it is used to store PHY calibration data */
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
+	pinMode(COMMAND_PIN, OUTPUT);
+	pinMode(LED_PIN, OUTPUT);
+  	Serial1.begin(38400, SERIAL_8N1, RXD, TXD);
 
 	wsMutex = xSemaphoreCreateMutex();
     sppQueue = xQueueCreate(SPP_QUEUE_SIZE, MAX_MSG_SIZE);
@@ -1037,6 +1059,7 @@ void setup() {
 	LittleFS.begin();
 
 	timeSync = new EspSNTPTimeSync(TimeFliesClock::getTimeZone(), asyncTimeSetCallback, NULL);
+	timeSync->init();
 
     xTaskCreatePinnedToCore(
         commitEEPROMTaskFn,   /* Function to implement the task */
@@ -1069,9 +1092,7 @@ void setup() {
 	LEDs::getBaselightBlue().setCallback(onBlueBaselightsChanged);
 
 	WiFi.setSleep(false);
-#if CORE_DEBUG_LEVEL == ARDUHAL_LOG_LEVEL_DEBUG
     wifiManager.setDebugOutput(true);
-#endif
     wifiManager.setHostname(hostName.value.c_str()); // name router associates DNS entry with
     wifiManager.setCustomOptionsHTML("<br><form action='/t' name='time_form' method='post'><button name='time' onClick=\"{var now=new Date();this.value=now.getFullYear()+','+(now.getMonth()+1)+','+now.getDate()+','+now.getHours()+','+now.getMinutes()+','+now.getSeconds();} return true;\">Set Clock Time</button></form><br><form action=\"/app.html\" method=\"get\"><button>Configure Clock</button></form>");
     wifiManager.addParameter(hostnameParam);
@@ -1095,7 +1116,6 @@ void setup() {
 
 	hostName.setCallback(onHostnameChanged);
 
-#ifdef USE_BT
     xTaskCreatePinnedToCore(
         sppTaskFn,   /* Function to implement the task */
         "BT SPP task", /* Name of the task */
@@ -1104,7 +1124,7 @@ void setup() {
         tskIDLE_PRIORITY + 1,     /* More than background tasks */
         &sppTask,    /* Task handle. */
         xPortGetCoreID());
-#endif
+
     Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)

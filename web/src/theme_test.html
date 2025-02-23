@@ -1,0 +1,28 @@
+
+<div data-role="page" id="Theme Test">
+	<div data-role="header" data-position="fixed">
+		<h1>Theme Test</h1>
+		<a href="#mainMenu" data-rel="main-menu-panel"
+			class="ui-btn ui-btn-left ui-btn-icon-notext ui-icon-bars ui-corner-all"></a>
+	</div>
+	<div data-role="content">
+		<fieldset data-role="controlgroup">
+			<legend>Vertical:</legend>
+			<input onchange="elementChange(this);" type="radio" name="radio_set" id="radio-choice-v-2a" value="1" checked="checked">
+			<label for="radio-choice-v-2a">One</label>
+			<input onchange="elementChange(this);" type="radio" name="radio_set" id="radio-choice-v-2b" value="2">
+			<label for="radio-choice-v-2b">Two</label>
+			<input onchange="elementChange(this);" type="radio" name="radio_set" id="radio-choice-v-2c" value="3">
+			<label for="radio-choice-v-2c">Three</label>
+		</fieldset>
+		<fieldset data-role="controlgroup">
+			<legend>Vertical:</legend>
+			<input onchange="elementChange(this);" type="checkbox" name="checkbox_set" id="checkbox_set_one" checked="checked">
+			<label for="checkbox_set_one">One</label>
+			<input onchange="elementChange(this);" type="checkbox" name="checkbox_set" id="checkbox_set_two">
+			<label for="checkbox_set_two">Two</label>
+			<input onchange="elementChange(this);" type="checkbox" name="checkbox_set" id="checkbox_set_three">
+			<label for="checkbox_set_three">Three</label>
+		</fieldset>
+	</div>
+</div>

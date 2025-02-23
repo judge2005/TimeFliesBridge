@@ -6,41 +6,39 @@
 			class="ui-btn ui-btn-left ui-btn-icon-notext ui-icon-bars ui-corner-all"></a>
 	</div>
 	<div data-role="content">
-		<form action="/set_leds" method="POST" id="leds_form">
+		<div class="clearFloats"></div>
+		<fieldset class="color_picker" id="backlights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
+			<legend>Tube Backlights</legend>
+			<label for="backlight_red">Red Value</label>
+			<input data-wrapper-class="red" type="range" data-highlight="true" name="backlight_red" id="backlight_red" min="0" max="7" value="7">
 			<div class="clearFloats"></div>
-			<fieldset class="color_picker" id="backlights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
-				<legend>Tube Backlights</legend>
-				<label for="backlight_red">Red Value</label>
-				<input data-wrapper-class="red" type="range" name="backlight_red" id="backlight_red" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="backlight_green">Green Value</label>
-				<input data-wrapper-class="green" type="range" name="backlight_green" id="backlight_green" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="backlight_blue">Blue Value</label>
-				<input data-wrapper-class="blue" type="range" name="backlight_blue" id="backlight_blue" min="0" max="7" value="7">
-			</fieldset>
-			<fieldset class="color_picker" id="underlights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
-				<legend>Tube Unit Underlights</legend>
-				<label for="underlight_red">Red Value</label>
-				<input data-wrapper-class="red" type="range" name="underlight_red" id="underlight_red" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="underlight_green">Green Value</label>
-				<input data-wrapper-class="green" type="range" name="underlight_green" id="underlight_green" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="underlight_blue">Blue Value</label>
-				<input data-wrapper-class="blue" type="range" name="underlight_blue" id="underlight_blue" min="0" max="7" value="7">
-			</fieldset>
-			<fieldset class="color_picker" id="baselights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
-				<legend>Base Underlights</legend>
-				<label for="baselight_red">Red Value</label>
-				<input data-wrapper-class="red" type="range" name="baselight_red" id="baselight_red" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="baselight_green">Green Value</label>
-				<input data-wrapper-class="green" type="range" name="baselight_green" id="baselight_green" min="0" max="7" value="7">
-				<div class="clearFloats"></div>
-				<label for="baselight_blue">Blue Value</label>
-				<input data-wrapper-class="blue" type="range" name="baselight_blue" id="baselight_blue" min="0" max="7" value="7">
-			</fieldset>
-</form>
+			<label for="backlight_green">Green Value</label>
+			<input data-wrapper-class="green" type="range" data-highlight="true" name="backlight_green" id="backlight_green" min="0" max="7" value="7">
+			<div class="clearFloats"></div>
+			<label for="backlight_blue">Blue Value</label>
+			<input data-wrapper-class="blue" type="range" data-highlight="true" name="backlight_blue" id="backlight_blue" min="0" max="7" value="7">
+		</fieldset>
+		<fieldset class="color_picker" id="underlights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
+			<legend>Tube Unit Underlights</legend>
+			<label for="underlight_red">Red Value</label>
+			<input data-wrapper-class="red" type="range" data-highlight="true" name="underlight_red" id="underlight_red" min="0" max="7" value="7">
+			<div class="clearFloats"></div>
+			<label for="underlight_green">Green Value</label>
+			<input data-wrapper-class="green" type="range" data-highlight="true" name="underlight_green" id="underlight_green" min="0" max="7" value="7">
+			<div class="clearFloats"></div>
+			<label for="underlight_blue">Blue Value</label>
+			<input data-wrapper-class="blue" type="range" data-highlight="true" name="underlight_blue" id="underlight_blue" min="0" max="7" value="7">
+		</fieldset>
+		<fieldset class="color_picker" id="baselights" data-collapsed="false" data-role="collapsible" data-iconpos="right" data-collapsed-icon="carat-d" data-expanded-icon="carat-u">
+			<legend>Base Underlights</legend>
+			<label for="baselight_red">Red Value</label>
+			<input data-wrapper-class="red" type="range" data-highlight="true" name="baselight_red" id="baselight_red" min="0" max="7" value="7">
+			<div class="clearFloats"></div>
+			<label for="baselight_green">Green Value</label>
+			<input data-wrapper-class="green" type="range" data-highlight="true" name="baselight_green" id="baselight_green" min="0" max="7" value="7">
+			<div class="clearFloats"></div>
+			<label for="baselight_blue">Blue Value</label>
+			<input data-wrapper-class="blue" type="range" data-highlight="true" name="baselight_blue" id="baselight_blue" min="0" max="7" value="7">
+		</fieldset>
 	</div>
 </div>
