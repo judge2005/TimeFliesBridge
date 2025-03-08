@@ -23,10 +23,11 @@ public:
     static BooleanConfigItem& getRippleDirection() { static BooleanConfigItem ripple_direction("ripple_direction", false); return ripple_direction; } // 0 = right-to-left, 1 = left-to-right
     static BooleanConfigItem& getRippleSpeed() { static BooleanConfigItem ripple_speed("ripple_speed", false); return ripple_speed; } // 0 = slow, 1 = fast
 
+    void setMov(bool mov);
     bool clockOn();
     void setTimeSync(TimeSync *pTimeSync) { this->pTimeSync = pTimeSync; }
 private:
-
+    bool movOn = false;
 	TimeSync *pTimeSync = 0;
 };
 

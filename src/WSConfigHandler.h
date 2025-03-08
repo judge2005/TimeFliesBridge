@@ -6,16 +6,14 @@
 
 class WSConfigHandler: public WSHandler {
 public:
-	typedef String (*CbFunc)();
-
 	WSConfigHandler(BaseConfigItem& rootConfig, const char *name) :
 		cbFunc(NULL),
 		rootConfig(rootConfig),
 		name(name) {
 	}
 
-	WSConfigHandler(BaseConfigItem& rootConfig, const char *name, CbFunc cbFunc) :
-		cbFunc(cbFunc),
+	WSConfigHandler(BaseConfigItem& rootConfig, const char *name, std::function<String()> callback) :
+		cbFunc(callback),
 		rootConfig(rootConfig),
 		name(name) {
 	}
@@ -24,7 +22,7 @@ public:
 	virtual void broadcast(AsyncWebSocket &ws, const char *data);
 
 private:
-	CbFunc cbFunc;
+	std::function<String()> cbFunc;
 
 	String getData(const char *data);
 	

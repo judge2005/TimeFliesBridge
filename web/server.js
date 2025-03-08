@@ -33,7 +33,8 @@ var pages = {
 			{"2": { "url" : "leds.html", "title" : "LEDs" }},
 			{"3": { "url" : "extra.html", "title" : "Extra" }},
 			{"4": { "url" : "info.html", "title" : "Info" }},
-			{"5": { "url" : "theme_test.html", "title" : "Theme Test" }}
+			{"5": { "url" : "sync.html", "title" : "Network" }},
+			{"6": { "url" : "theme_test.html", "title" : "Theme Test" }}
 		]
 	}
 
@@ -79,9 +80,17 @@ var sendInfoValues = function(conn) {
 	conn.send(json);
 }
 
+var sendSync = function(conn) {
+	var json = '{"type":"sv.init.sync","value":';
+	json += JSON.stringify(state[5]);
+	json += '}';
+	console.log(json);
+	conn.send(json);
+}
+
 var sendThemeTestValues = function(conn) {
 	var json = '{"type":"sv.init.theme_test","value":';
-	json += JSON.stringify(state[5]);
+	json += JSON.stringify(state[6]);
 	json += '}';
 	console.log(json);
 	conn.send(json);
@@ -130,6 +139,12 @@ var state = {
 		'up_time' : "2567 days 12:00:01"
 	},
 	"5": {
+		'sync_port' : '12345',
+		'sync_role' : 'false',
+		'set_icon_sync' : 'burble',
+		'wifi_ap' : true
+	},
+	"6": {
 		'radio_set' : 2,
 		'checkbox_set_one' : true,
 		'checkbox_set_two' : false,
@@ -208,6 +223,9 @@ wss.on('connection', function(conn) {
 			sendInfoValues(conn);
 			break;
 		case 5:
+			sendSync(conn);
+			break;
+		case 6:
 			sendThemeTestValues(conn);
 			break;
 		case 9:

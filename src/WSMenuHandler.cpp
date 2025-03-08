@@ -4,6 +4,7 @@ String WSMenuHandler::clockMenu = "{\"1\": { \"url\" : \"clock.html\", \"title\"
 String WSMenuHandler::ledsMenu = "{\"2\": { \"url\" : \"leds.html\", \"title\" : \"LEDs\" }}";
 String WSMenuHandler::extraMenu = "{\"3\": { \"url\" : \"extra.html\", \"title\" : \"Extra\" }}";
 String WSMenuHandler::infoMenu = "{\"4\": { \"url\" : \"info.html\", \"title\" : \"Info\" }}";
+String WSMenuHandler::syncMenu = "{\"5\": { \"url\" : \"sync.html\", \"title\" : \"Network\" }}";
 
 void WSMenuHandler::handle(AsyncWebSocketClient *client, const char *data) {
 	String json("{\"type\":\"sv.init.menu\", \"value\":[");

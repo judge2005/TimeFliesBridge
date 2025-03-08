@@ -23,11 +23,12 @@
 #include "WSConfigHandler.h"
 #include "TimeFliesClock.h"
 #include "LEDs.h"
+#include "MovementSensor.h"
+#include "Uptime.h"
+#include "Logger.h"
 
 #include "time.h"
 #include "sys/time.h"
-
-#define TIME_FLIES_TAG "TIME_FLIES"
 
 #define OTA
 #define MAX_MSG_SIZE 40
@@ -37,191 +38,20 @@ const char *manifest[]{
     // Firmware name
     "Time Flies Bridge",
     // Firmware version
-    "0.1.0",
+    "0.2.0",
     // Hardware chip/variant
-    "esp32-pico-devkitm-2",
+    "ESP32",
     // Device name
     "Time Flies"
 };
 
+const char* TIME_FLIES_TAG = "TIME_FLIES";
+
 void broadcastUpdate(String originalKey, const BaseConfigItem& item);
 void broadcastUpdate(const JsonDocument &doc);
 
-class Uptime {
-public:
-	Uptime() {
-		utMutex = xSemaphoreCreateMutex();
-	}
-	char *uptime();
-	void loop();
-
-private:
-	SemaphoreHandle_t utMutex;
-	unsigned long long rollover = 0;
-	unsigned long lastMillis;
-	char _return[32];
-};
-
-void Uptime::loop() {
-	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
-		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
-		return;
-	}
-
-	unsigned long now = millis();
-	if (lastMillis > now) {
-		rollover++;
-	}
-	lastMillis = now;
-
-	xSemaphoreGive(utMutex);
-}
-
-char *Uptime::uptime() {
-	if (xSemaphoreTake(utMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
-		ESP_LOGE(TIME_FLIES_TAG, "Failed to obtain utMutex");
-		*_return = 0;
-		return _return;
-	}
-
-	unsigned long long _now = (rollover << 32) + lastMillis;
-	unsigned long secs = _now / 1000LL, mins = secs / 60;
-	unsigned long hours = mins / 60, days = hours / 24;
-	secs -= mins * 60;
-	mins -= hours * 60;
-	hours -= days * 24;
-	sprintf(_return, "%d days %02dh %02dm %02ds", (int) days,
-			(int) hours, (int) mins, (int) secs);
-
-	xSemaphoreGive(utMutex);
-
-	return _return;
-}
-
 Uptime uptime;
-
-#define LOG_ENTRY_SIZE 100
-#define MAX_LOG_ENTRIES 40
-
-typedef enum {
-	ERROR = 1,
-	WARN,
-	INFO,
-	DEBUG,
-	VERBOSE
-} LogLevel;
-
-class Logger {
-public:
-	static void log(LogLevel lvl, const char *format, ...) {
-		va_list args;
-		va_start(args, format);
-		int tailIndex = (startLogIndex + numLogEntries) % MAX_LOG_ENTRIES;
-		
-		if (numLogEntries == MAX_LOG_ENTRIES) {
-			startLogIndex = (startLogIndex + 1) % MAX_LOG_ENTRIES;
-		}
-
-		vsnprintf(logBuffer[tailIndex], LOG_ENTRY_SIZE, format, args);
-
-		numLogEntries = min(++numLogEntries, MAX_LOG_ENTRIES);
-
-		switch (lvl) {
-			case ERROR:
-				ESP_LOGE(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
-				break;
-
-			case WARN:
-				ESP_LOGW(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
-				break;
-
-			case INFO:
-				ESP_LOGI(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
-				break;
-
-			case DEBUG:
-				ESP_LOGD(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
-				break;
-
-			case VERBOSE:
-				ESP_LOGV(TIME_FLIES_TAG, "%s", logBuffer[tailIndex]);
-				break;
-		}
-
-		ESP_LOGD(TIME_FLIES_TAG, "After log: startIndex=%d, tailIndex=%d, numEntries=%d", startLogIndex, tailIndex, numLogEntries);
-
-		broadcastUpdate();
-
-		va_end(args); 
-	}
-
-	static String escape_json(const char *s) {
-		String ret("\"");
-		ret.reserve(strlen(s) + 10);
-		const char *start = s;
-		const char *end = start + strlen(s);
-		for (const char *c = start; c != end; c++) {
-			switch (*c) {
-			case '"': ret += "\\\""; break;
-			case '\\': ret += "\\\\"; break;
-			case '\b': ret += "\\b"; break;
-			case '\f': ret += "\\f"; break;
-			case '\n': ret += "\\n"; break;
-			case '\r': ret += "\\r"; break;
-			case '\t': ret += "\\t"; break;
-			default:
-				if ('\x00' <= *c && *c <= '\x1f') {
-					char buf[10];
-					sprintf(buf, "\\u%04x", (int)*c);
-					ret += buf;
-				} else {
-					ret += *c;
-				}
-			}
-		}
-		ret += "\"";
-
-		return ret;
-	}
-
-	static String getSerializedJsonLog() {
-		char *comma = ",";
-		String s = ",\"console_data\":[";
-		char *sep = "";
-		if (numLogEntries > 0) {
-			for (int count=0, index=startLogIndex; count < numLogEntries; count++, index = (index+1) % MAX_LOG_ENTRIES) {
-				s += sep;
-				s += escape_json(logBuffer[index]);
-				sep = comma;
-			}
-
-			s += "]";
-		}
-		return s;
-	}
-
-	static void broadcastUpdate() {
-		if (numLogEntries > 0) {
-			JsonDocument doc;
-			doc["type"] = "sv.update";
-			for (int count=0, index=startLogIndex; count < numLogEntries; count++, index = (index+1) % MAX_LOG_ENTRIES) {
-		
-				doc["value"]["console_data"][count] = logBuffer[index];
-			}
-
-			::broadcastUpdate(doc);
-		}
-	}
-
-private:
-	static int startLogIndex;
-	static int numLogEntries;
-	static char logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE];
-};
-
-int Logger::startLogIndex = 0;
-int Logger::numLogEntries = 0;
-char Logger::logBuffer[MAX_LOG_ENTRIES][LOG_ENTRY_SIZE] = {};
+Logger logger;
 
 typedef enum {
 	NOT_INITIALIZED = 0,
@@ -248,14 +78,17 @@ AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
 DNSServer dns;
 AsyncWiFiManager wifiManager(&server, &dns);
 ASyncOTAWebUpdate otaUpdater(Update, "update", "secretsauce");
+WiFiUDP syncBus;
+
 AsyncWiFiManagerParameter *hostnameParam;
 EspSNTPTimeSync *timeSync;
 TimeFliesClock timeFliesClock;
+MovementSensor mov;
 
 TaskHandle_t commitEEPROMTask;
 TaskHandle_t sppTask;
-TaskHandle_t clockTask;
 TaskHandle_t wifiManagerTask;
+TaskHandle_t syncBusTask;
 
 SemaphoreHandle_t wsMutex;
 QueueHandle_t sppQueue;
@@ -315,11 +148,26 @@ BaseConfigItem* configSetGlobal[] = {
 
 CompositeConfigItem globalConfig("global", 0, configSetGlobal);
 
+// Sync config values
+IntConfigItem sync_port("sync_port", 4920);
+BooleanConfigItem sync_role("sync_role", false);	// false = no sync, true = slave (remote sync)
+ByteConfigItem mov_delay("mov_delay", 20);
+
+BaseConfigItem* syncSet[] {
+	&sync_port,
+	&sync_role,
+	&mov_delay,
+	0
+};
+
+CompositeConfigItem syncConfig("sync", 0, syncSet);
+
 BaseConfigItem* rootConfigSet[] = {
     &globalConfig,
 	&clockConfig,
 	&ledsConfig,
 	&extraConfig,
+	&syncConfig,
     0
 };
 
@@ -328,7 +176,6 @@ CompositeConfigItem rootConfig("root", 0, rootConfigSet);
 EEPROMConfig config(rootConfig);
 
 // Declare some functions
-void setWiFiCredentials(const char *ssid, const char *password);
 void setWiFiAP(bool);
 void infoCallback();
 
@@ -353,6 +200,99 @@ String chipId = getChipId();
 void createSSID() {
 	// Create a unique SSID that includes the hostname. Max SSID length is 32!
 	ssid = (chipId + hostName).substring(0, 31);
+}
+
+String wifiCallback() {
+	String wifiStatus = "\"wifi_ap\":";
+
+	if ((WiFi.getMode() & WIFI_MODE_AP) != 0) {
+		wifiStatus += "true";
+	} else {
+		wifiStatus += "false";
+	}
+
+	wifiStatus += ",";
+	wifiStatus += "\"hostname\":\"";
+	wifiStatus += hostName.value;
+	wifiStatus += "\"";
+
+	return wifiStatus;
+}
+
+uint16_t syncBusPort = 0;
+unsigned long lastMoved = 0;
+
+void writeSyncBus(const char msg[]) {
+	IPAddress broadcastIP(~WiFi.subnetMask() | WiFi.gatewayIP());
+	syncBusPort = sync_port;
+	syncBus.beginPacket(broadcastIP, syncBusPort);
+	syncBus.write((unsigned char*)msg, strlen(msg));
+	syncBus.endPacket();
+}
+
+void announceSlave() {
+	static char syncMsg[] = "slave";
+	if (sync_role) {
+		writeSyncBus(syncMsg);
+	}
+}
+
+void readSyncBus() {
+	static char incomingMsg[10];
+
+	int size = syncBus.parsePacket();
+
+	if (size) {
+		int len = syncBus.read(incomingMsg, 9);
+		if (len > 0 && len < 10) {
+			incomingMsg[len] = 0;
+
+			if (strncmp("mov", incomingMsg, 3) == 0) {
+				lastMoved = millis();
+				mov.trigger();
+			}
+		}
+	}
+}
+
+void syncBusTaskFn(void *pArg) {
+	static bool currentRole = false;
+
+	mov.setOnTime(millis());
+
+	while (true) {
+		mov.setDelay(mov_delay);
+		mov.setEnabled(sync_role);
+
+		if (sync_role) {
+			// If port has changed, set new port and announce status
+			if (syncBusPort != sync_port) {
+				syncBusPort = sync_port;
+				currentRole = false;	// Force a begin
+			}
+		} else {
+			// We aren't in a sync group, stop the sync bus
+			currentRole = sync_role;
+			syncBus.stop();
+		}
+
+		if (currentRole != sync_role) {
+			if (sync_role) {
+				// We used to not be in a sync group, or the sync group has changed
+				syncBus.begin(syncBusPort);
+			}
+
+			currentRole = sync_role;
+
+			if (currentRole) {
+				// We have become a slave
+				announceSlave();
+			}
+		}
+
+		readSyncBus();
+		delay(10);
+	}
 }
 
 uint32_t cmdDelay = 1000;
@@ -429,7 +369,7 @@ void readFromServer() {
 
 					// If there was something other than just CRLF
 					if (r_position > 1) {
-						Logger::log(INFO, "< %s", r_buffer);
+						logger.log(Logger::INFO, "< %s", r_buffer);
 					}
 
                     r_position = 0;
@@ -645,7 +585,7 @@ bool verifySPPCommand(String command) {
 	String response = Serial1.readStringUntil('\n');
 	bool ret = response.equals(OK_RESPONSE);
 	if (!ret) {
-		Logger::log(WARN, "! %s", response.c_str());
+		logger.log(Logger::WARN, "! %s", response.c_str());
 	}
 
 	return ret;
@@ -658,10 +598,10 @@ void getSPPState() {
 	if (status >= 0 && status <= 9) {
 		if (connectionStatus != status) {
 			connectionStatus = (SPPConnectionState)status;
-			Logger::log(INFO, "+ %s", state2string[connectionStatus].c_str());
+			logger.log(Logger::INFO, "+ %s", state2string[connectionStatus].c_str());
 		}
 	} else {
-		Logger::log(WARN, "! %s", result.c_str());
+		logger.log(Logger::WARN, "! %s", result.c_str());
 	}
 	// Read OK\r\n - keep going until we get OK or until 1s passes
 	unsigned long start = millis();
@@ -701,6 +641,16 @@ void sppTaskFn(void *pArg) {
 	bool ledOn = false;
 	uint32_t lastLedOn = millis();
 
+	xTaskCreatePinnedToCore(
+		syncBusTaskFn, /* Function to implement the task */
+		"Sync bus task", /* Name of the task */
+		4096,  /* Stack size in words */
+		NULL,  /* Task input parameter */
+		tskIDLE_PRIORITY,  /* More than background tasks */
+		&syncBusTask,  /* Task handle. */
+		0
+		);
+
 	while(true) {
 		BaseType_t result = xQueuePeek(sppQueue, msg, pdMS_TO_TICKS(maxWait));
 		uptime.loop();
@@ -714,7 +664,7 @@ void sppTaskFn(void *pArg) {
 				lastConnectedTime = millis();
 				xQueueReceive(sppQueue, msg, 0);
 				delay(delayNextMsg);
-				Logger::log(INFO, "> %s", msg);
+				logger.log(Logger::INFO, "> %s", msg);
 				Serial1.println(msg);
 				delayNextMsg = cmdDelay;
 				continue;
@@ -725,6 +675,8 @@ void sppTaskFn(void *pArg) {
 			cmdDelay = 1000;
 			delayNextMsg = 1;
 		}
+
+		timeFliesClock.setMov(mov.isOn());
 
 		// NOTE: sendCommands(...) just puts them on the queue
 		if (timeFliesClock.clockOn() != wasOn) {
@@ -747,7 +699,7 @@ void sppTaskFn(void *pArg) {
 			ledOn = true;
 #ifdef DISCONNECT_ON_DILE
 			if (millis() - lastConnectedTime > 30000) {
-				Logger::log(INFO, "Disconnecting");
+				logger.log(INFO, "Disconnecting");
 				closeConnection();
 			}
 #endif
@@ -775,13 +727,15 @@ String* items[] {
 	&WSMenuHandler::ledsMenu,
 	&WSMenuHandler::extraMenu,
 	&WSMenuHandler::infoMenu,
+	&WSMenuHandler::syncMenu,
 	0
 };
 
 WSMenuHandler wsMenuHandler(items);
 WSConfigHandler wsClockHandler(rootConfig, "clock");
 WSConfigHandler wsLEDsHandler(rootConfig, "leds");
-WSConfigHandler wsExtrasHandler(rootConfig, "extra", Logger::getSerializedJsonLog);
+WSConfigHandler wsExtrasHandler(rootConfig, "extra", []() { return logger.getSerializedJsonLog(); });
+WSConfigHandler wsSyncHandler(rootConfig, "sync", wifiCallback);
 WSInfoHandler wsInfoHandler(infoCallback);
 
 // Order of this needs to match the numbers in WSMenuHandler.cpp
@@ -791,7 +745,7 @@ WSHandler* wsHandlers[] {
 	&wsLEDsHandler,
 	&wsExtrasHandler,
 	&wsInfoHandler,
-	NULL,
+	&wsSyncHandler,
 	NULL,
 	NULL,
 	NULL
@@ -853,8 +807,15 @@ void updateValue(String originalKey, String _key, String value, BaseConfigItem *
 			// Order of below is important to maintain external consistency
 			broadcastUpdate(originalKey, *item);
 			item->notify();
+		} else if (_key == "sync_do") {
+			announceSlave();
 		} else if (_key == "wifi_ap") {
 			setWiFiAP(value == "true" ? true : false);
+		} else if (_key == "hostname") {
+			hostName = value;
+			hostName.put();
+			config.commit();
+			ESP.restart();
 		} else if (_key == "push_all_values") {
 			pushAllValues();
 		} else if (_key == "push_time") {
@@ -1043,6 +1004,7 @@ void initFromEEPROM() {
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
+	logger.setUpdateCallback([] (const JsonDocument& doc) { broadcastUpdate(doc); });
 
 	pinMode(COMMAND_PIN, OUTPUT);
 	pinMode(LED_PIN, OUTPUT);
@@ -1125,7 +1087,7 @@ void setup() {
         &sppTask,    /* Task handle. */
         xPortGetCoreID());
 
-    Logger::log(DEBUG, "setup() running on core %d", xPortGetCoreID());
+    logger.log(Logger::DEBUG, "setup() running on core %d", xPortGetCoreID());
 
     vTaskDelete(NULL);	// Delete this task (so loop() won't be called)
 }

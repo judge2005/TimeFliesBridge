@@ -15,6 +15,7 @@ public:
 	static String ledsMenu;
 	static String extraMenu;
 	static String infoMenu;
+	static String syncMenu;
 
 private:
 	String **items;

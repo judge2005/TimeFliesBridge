@@ -3,6 +3,10 @@
 TimeFliesClock::TimeFliesClock() {
 }
 
+void TimeFliesClock::setMov(bool mov) {
+    this->movOn = mov;
+}
+
 bool TimeFliesClock::clockOn() {
 	struct tm now;
 	suseconds_t uSec;
@@ -20,5 +24,5 @@ bool TimeFliesClock::clockOn() {
         }
     }
 
-	return scheduledOn;
+	return scheduledOn && movOn;
 }
